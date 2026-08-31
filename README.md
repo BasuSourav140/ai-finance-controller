@@ -2,6 +2,8 @@
 
 > **Gemini extracts facts. Deterministic application code decides policy compliance.**
 
+Built for the **Razorpay Buildathon 2026**.
+
 An AI-powered financial expense auditing engine that combines LLM-based document extraction with deterministic financial controls.
 
 The system extracts structured transaction data from invoices, receipts, and expense documents, validates the AI output, self-corrects malformed responses with a bounded retry, evaluates transactions against explicit company policies, calculates risk, and produces actionable audit recommendations.
@@ -289,31 +291,6 @@ CRITICAL RISK
 
 ---
 
-# Policy Registry
-
-Policies are represented as structured rules:
-
-```text
-┌────────┬────────────────────────────────────┐
-│ P-001  │ Meal Expense Limit                 │
-├────────┼────────────────────────────────────┤
-│ P-002  │ SaaS Department Code               │
-├────────┼────────────────────────────────────┤
-│ P-003  │ Invoice Date Requirement            │
-└────────┴────────────────────────────────────┘
-```
-
-Every deterministic policy violation contains:
-
-```ts
-{
-  policy_id: string;
-  policy_name: string;
-  message: string;
-}
-```
-
-This allows the audit interface to identify exactly which rule failed and why.
 
 ---
 
@@ -597,7 +574,7 @@ Strategic Recommendation
         ↓
 Raw Agent JSON
         ↓
-Original Document
+Original Transaction Input
 ```
 
 This creates a visible audit trail from source document to final policy decision.
@@ -762,7 +739,6 @@ The application does not make independent guarantees about provider-side retenti
 - AI Agent Service
 - JSON / Schema Validator
 - Deterministic Policy Engine
-- Policy Registry
 - Risk Assessment
 - Recommendation Engine
 - Agent Execution Timeline
@@ -1247,7 +1223,7 @@ The current implementation includes:
 - Audit dashboard
 - Detailed audit drawer
 - Raw JSON inspection
-- Original-document inspection
+- Original transaction input inspection
 - BYOK API-key architecture
 - Friendly API error handling
 - ESLint validation
