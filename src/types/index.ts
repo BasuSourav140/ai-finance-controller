@@ -106,3 +106,109 @@ export interface AuditMetrics {
 
   cleanCount: number;
 }
+
+
+/*
+ * ============================================================
+ * BATCH EVALUATION
+ * ============================================================
+ *
+ * Types used by the synthetic-data evaluation system.
+ *
+ * The evaluator compares the application's actual audit
+ * decision against a known ground-truth decision.
+ */
+
+
+/*
+ * ------------------------------------------------------------
+ * SYNTHETIC TRANSACTION
+ * ------------------------------------------------------------
+ *
+ * Represents one controlled test record.
+ */
+
+export interface SyntheticTransaction {
+  id: string;
+
+  raw_input: string;
+
+  expected_policy_status: PolicyStatus;
+
+  expected_risk_level: RiskLevel;
+
+  expected_policy_ids: string[];
+}
+
+
+/*
+ * ------------------------------------------------------------
+ * BATCH EVALUATION RESULT
+ * ------------------------------------------------------------
+ *
+ * Represents the result of auditing one synthetic record.
+ */
+
+export interface BatchEvaluationResult {
+  transaction_id: string;
+
+  expected_policy_status: PolicyStatus;
+
+  actual_policy_status: PolicyStatus;
+
+  expected_risk_level: RiskLevel;
+
+  actual_risk_level: RiskLevel;
+
+  expected_policy_ids: string[];
+
+  actual_policy_ids: string[];
+
+  matched: boolean;
+
+  result?: AuditedInvoice;
+
+  error?: string;
+}
+
+
+/*
+ * ------------------------------------------------------------
+ * BATCH EVALUATION METRICS
+ * ------------------------------------------------------------
+ */
+
+export interface BatchEvaluationMetrics {
+  total_records: number;
+
+  processed_records: number;
+
+  matched_records: number;
+
+  exception_count: number;
+
+  match_rate: number;
+
+  policy_violation_count: number;
+
+  clean_transaction_count: number;
+
+  exceptions: BatchEvaluationResult[];
+}
+
+
+/*
+ * ------------------------------------------------------------
+ * BATCH EVALUATION
+ * ------------------------------------------------------------
+ *
+ * Complete output produced by the batch evaluator.
+ */
+
+export interface BatchEvaluation {
+  metrics: BatchEvaluationMetrics;
+
+  results: BatchEvaluationResult[];
+
+  evaluated_at: string;
+}
