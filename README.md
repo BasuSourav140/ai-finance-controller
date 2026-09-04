@@ -35,7 +35,24 @@ This project is built around that requirement:
 | Reliable controls | Deterministic policy engine evaluates compliance |
 | Auditability | Policy IDs, risk, recommendation, source input, raw model output, and execution timeline |
 
-No benchmark score is hard-coded into this README. The score shown by the application depends on the configured LLM and the actual benchmark run.
+### Final Benchmark Result
+
+The current controller was evaluated against the final **60-record synthetic finance-operations dataset** using the configured local LLM setup.
+
+| Metric | Result |
+| --- | ---: |
+| Records evaluated | **60/60** |
+| Matched records | **60** |
+| Match rate | **100.00%** |
+| Unresolved exceptions | **0** |
+| Clean transactions | **23** |
+| Transactions with policy violations | **37** |
+
+The benchmark comparison requires the expected policy status, expected risk level, and expected policy IDs to all match the controller output.
+
+During benchmark validation, three synthetic ground-truth labels were found to assign **P-002 (SaaS Department Code)** to transactions whose category was **Meal**. Because P-002 applies only to Software/SaaS expenses, those three labels were corrected to align the synthetic ground truth with the registered deterministic policy definitions. A prior run against the inconsistent labels produced **57/60 matches (95.00%)**; the final 60-record run after the ground-truth correction produced **60/60 matches (100.00%)** with **0 unresolved exceptions**.
+
+The result is a measurement against this synthetic dataset and configured model, not a claim of universal real-world accuracy.
 
 ---
 
@@ -1149,7 +1166,7 @@ The audit drawer and benchmark exception view are designed around these question
 
 ## Measure before claiming accuracy
 
-The benchmark is treated as an evaluation tool, not a marketing number. A final competition submission should quote the actual measured result from the final dataset/model configuration.
+The benchmark is treated as an evaluation tool, not a marketing number. The current final run produced **60/60 matches (100.00%) with 0 unresolved exceptions** after aligning three inconsistent synthetic labels with the registered deterministic policy definitions. A competition submission should quote the actual measured result from the final dataset/model configuration and disclose material benchmark-label corrections.
 
 ---
 
@@ -1184,7 +1201,9 @@ Before submission, verify:
 - The GitHub repository is public.
 - The final repository contains the working benchmark and evaluation dataset.
 - The full benchmark has been run against the final model/configuration.
+- The final run produced 60/60 matches (100.00%) with 0 unresolved exceptions.
 - The measured match rate is copied from the actual benchmark output.
+- Any material synthetic ground-truth corrections are documented in this README.
 - Unresolved exceptions are shown honestly.
 - The 5-minute pitch demonstrates the finance-ops loop, not only the UI.
 - The architecture shown in the pitch matches the implementation documented here.
