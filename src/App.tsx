@@ -14,6 +14,7 @@ import {
 import { Header } from "./components/Header";
 import { PolicyPanel } from "./components/PolicyPanel";
 import { Metrics } from "./components/Metrics";
+import { BatchEvaluationPanel } from "./components/BatchEvaluationPanel";
 import { AuditTable } from "./components/AuditTable";
 import { ResultDrawer } from "./components/ResultDrawer";
 
@@ -27,16 +28,24 @@ import {
   type AgentEvent,
 } from "./services/aiAgent";
 
+import {
+  loadLLMConfig,
+  saveLLMConfig,
+} from "./services/llm/llmConfig";
+
 import type {
   AgentStatus,
   AuditedInvoice,
   AuditMetrics,
+  LLMConfig,
 } from "./types";
 
 
-const API_KEY_STORAGE =
-  "ai-finance-controller-gemini-key";
-
+/*
+ * ============================================================
+ * SAMPLE INVOICE
+ * ============================================================
+ */
 
 const SAMPLE_INVOICE = `Vendor: CloudStack Technologies
 Invoice Number: CST-2026-0912
@@ -54,118 +63,114 @@ Total: ₹5,723`;
 
 /*
  * ============================================================
- * USER-FRIENDLY ERROR MESSAGES
+ * USER-FRIENDLY ERRORS
  * ============================================================
- *
- * Convert technical Gemini/API errors into messages
- * that make sense to someone using the controller.
  */
 
 function getUserFriendlyError(
-  error: unknown
+  error: unknown,
 ): string {
 
-  if (!(error instanceof Error)) {
-    return "AI Agent failed. Manual review required.";
+  if (
+    !(error instanceof Error)
+  ) {
+
+    return (
+      "AI Agent failed. Manual review required."
+    );
   }
+
 
   const message =
     error.message.toLowerCase();
 
 
   /*
-   * Gemini quota / rate limit.
+   * Rate limiting / quota.
    */
+
   if (
     message.includes("quota") ||
     message.includes("rate limit") ||
     message.includes("429") ||
-    message.includes(
-      "too many requests"
-    )
+    message.includes("too many requests")
   ) {
+
     return (
-      "Gemini quota or rate limit reached. " +
+      "LLM rate limit or quota reached. " +
       "The audit could not be completed. " +
-      "Please try again after the quota resets."
+      "Please try again later."
     );
   }
 
 
   /*
-   * Invalid / expired API key.
+   * Authentication.
    */
+
   if (
-    message.includes(
-      "api key"
-    ) ||
-    message.includes(
-      "authentication"
-    ) ||
-    message.includes(
-      "unauthorized"
-    ) ||
-    message.includes(
-      "permission"
-    ) ||
-    message.includes(
-      "403"
-    ) ||
-    message.includes(
-      "401"
-    )
+    message.includes("authentication") ||
+    message.includes("unauthorized") ||
+    message.includes("permission") ||
+    message.includes("api key") ||
+    message.includes("403") ||
+    message.includes("401")
   ) {
+
     return (
-      "Gemini API authentication failed. " +
-      "Please check your API key."
+      "LLM authentication failed. " +
+      "Please check the configured credential."
     );
   }
 
 
   /*
-   * Network / connection problem.
+   * Endpoint / network.
    */
+
   if (
-    message.includes(
-      "unable to reach"
-    ) ||
-    message.includes(
-      "network"
-    ) ||
-    message.includes(
-      "failed to fetch"
-    ) ||
-    message.includes(
-      "connection"
-    )
+    message.includes("unable to reach") ||
+    message.includes("network") ||
+    message.includes("failed to fetch") ||
+    message.includes("connection")
   ) {
+
     return (
-      "Unable to reach the Gemini API. " +
-      "Please check your internet connection and try again."
+      "Unable to reach the configured LLM endpoint. " +
+      "Please check the endpoint and network connection."
     );
   }
 
 
   /*
-   * Malformed AI response after
-   * the allowed self-correction attempt.
+   * Missing configuration.
    */
+
   if (
     message.includes(
-      "failed after"
-    ) ||
-    message.includes(
-      "validation"
-    ) ||
-    message.includes(
-      "invalid json"
-    ) ||
-    message.includes(
-      "schema"
+      "llm endpoint is required",
     )
   ) {
+
     return (
-      "The AI response could not be validated after " +
+      "Please configure an LLM endpoint before running an audit."
+    );
+  }
+
+
+  /*
+   * Schema validation.
+   */
+
+  if (
+    message.includes("validation") ||
+    message.includes("invalid json") ||
+    message.includes("schema") ||
+    message.includes("json object")
+  ) {
+
+    return (
+      "The LLM response could not be validated after " +
       "the allowed self-correction attempt. " +
       "Manual review is required."
     );
@@ -173,35 +178,31 @@ function getUserFriendlyError(
 
 
   /*
-   * Empty / invalid Gemini response.
+   * Empty / malformed API response.
    */
+
   if (
-    message.includes(
-      "empty response"
-    ) ||
-    message.includes(
-      "invalid api response"
-    )
+    message.includes("empty response") ||
+    message.includes("invalid api response")
   ) {
+
     return (
-      "Gemini returned an unusable response. " +
+      "The configured LLM returned an unusable response. " +
       "Please try the audit again."
     );
   }
 
 
   /*
-   * Preserve application-level
-   * validation messages.
+   * Preserve document-level errors.
    */
+
   if (
     message.includes(
-      "invoice or receipt"
-    ) ||
-    message.includes(
-      "api key is required"
+      "invoice text is required",
     )
   ) {
+
     return error.message;
   }
 
@@ -209,6 +210,7 @@ function getUserFriendlyError(
   /*
    * Safe fallback.
    */
+
   return (
     "AI Agent failed to complete the audit. " +
     "Manual review is required."
@@ -216,11 +218,20 @@ function getUserFriendlyError(
 }
 
 
+/*
+ * ============================================================
+ * APP
+ * ============================================================
+ */
+
 function App() {
 
-  const [apiKey, setApiKey] =
-  useState(() =>
-    localStorage.getItem(API_KEY_STORAGE) ?? ""
+  const [
+    llmConfig,
+    setLLMConfig,
+  ] = useState<LLMConfig>(
+    () =>
+      loadLLMConfig(),
   );
 
 
@@ -228,7 +239,7 @@ function App() {
     invoiceText,
     setInvoiceText,
   ] = useState(
-    SAMPLE_INVOICE
+    SAMPLE_INVOICE,
   );
 
 
@@ -266,7 +277,7 @@ function App() {
     setAgentStatus,
   ] =
     useState<AgentStatus>(
-      "idle"
+      "idle",
     );
 
 
@@ -281,29 +292,20 @@ function App() {
 
   /*
    * ==========================================================
-   * RESTORE SAVED API KEY
+   * LLM CONFIGURATION
    * ==========================================================
    */
 
-  
-
-
-  /*
-   * ==========================================================
-   * API KEY CHANGE
-   * ==========================================================
-   */
-
-  const handleApiKeyChange = (
-    value: string
+  const handleLLMConfigChange = (
+    config: LLMConfig,
   ) => {
 
-    setApiKey(value);
+    setLLMConfig(
+      config,
+    );
 
-
-    localStorage.setItem(
-      API_KEY_STORAGE,
-      value
+    saveLLMConfig(
+      config,
     );
   };
 
@@ -314,44 +316,50 @@ function App() {
    * ==========================================================
    */
 
-  const metrics: AuditMetrics =
-    useMemo(() => {
+  const metrics:
+    AuditMetrics =
+    useMemo(
+      () => {
 
-      return audits.reduce(
-        (
-          result,
-          invoice
-        ) => {
+        return audits.reduce(
+          (
+            result,
+            invoice,
+          ) => {
 
-          result.totalAmount +=
-            invoice.total_amount;
-
-
-          if (
-            invoice.policy_violation
-          ) {
-
-            result.violationCount +=
-              1;
-
-          } else {
-
-            result.cleanCount +=
-              1;
-          }
+            result.totalAmount +=
+              invoice.total_amount;
 
 
-          return result;
+            if (
+              invoice.policy_violation
+            ) {
 
-        },
-        {
-          totalAmount: 0,
-          violationCount: 0,
-          cleanCount: 0,
-        }
-      );
+              result.violationCount +=
+                1;
 
-    }, [audits]);
+            } else {
+
+              result.cleanCount +=
+                1;
+            }
+
+
+            return result;
+
+          },
+          {
+            totalAmount: 0,
+            violationCount: 0,
+            cleanCount: 0,
+          },
+        );
+
+      },
+      [
+        audits,
+      ],
+    );
 
 
   /*
@@ -363,7 +371,7 @@ function App() {
   const addActivity = (
     status: AgentStatus,
     message: string,
-    retryAttempt?: number
+    retryAttempt?: number,
   ) => {
 
     const entry:
@@ -385,11 +393,11 @@ function App() {
 
     setActivityEntries(
       (
-        current
+        current,
       ) => [
         ...current,
         entry,
-      ]
+      ],
     );
   };
 
@@ -401,7 +409,7 @@ function App() {
    */
 
   const handleAgentEvent = (
-    event: AgentEvent
+    event: AgentEvent,
   ) => {
 
     if (
@@ -410,13 +418,13 @@ function App() {
     ) {
 
       setAgentStatus(
-        event.status
+        event.status,
       );
 
 
       addActivity(
         event.status,
-        event.message
+        event.message,
       );
 
 
@@ -430,14 +438,14 @@ function App() {
     ) {
 
       setAgentStatus(
-        "correcting"
+        "correcting",
       );
 
 
       addActivity(
         "correcting",
         event.message,
-        event.attempt
+        event.attempt,
       );
     }
   };
@@ -456,22 +464,24 @@ function App() {
 
 
       /*
-       * Validate API key.
+       * Validate LLM endpoint.
        */
 
-      if (!apiKey.trim()) {
+      if (
+        !llmConfig.endpoint.trim()
+      ) {
 
         const message =
-          "Please enter your Gemini API key.";
+          "Please configure an LLM endpoint before running an audit.";
 
 
         setError(
-          message
+          message,
         );
 
 
         setAgentStatus(
-          "error"
+          "error",
         );
 
 
@@ -484,7 +494,7 @@ function App() {
               "error",
 
             message:
-              "Gemini API key is required.",
+              "LLM endpoint is required.",
 
             timestamp:
               new Date().toISOString(),
@@ -500,19 +510,21 @@ function App() {
        * Validate document.
        */
 
-      if (!invoiceText.trim()) {
+      if (
+        !invoiceText.trim()
+      ) {
 
         const message =
           "Please provide invoice or receipt data.";
 
 
         setError(
-          message
+          message,
         );
 
 
         setAgentStatus(
-          "error"
+          "error",
         );
 
 
@@ -542,39 +554,25 @@ function App() {
        */
 
       setIsAuditing(
-        true
+        true,
       );
 
 
       setError("");
 
 
-      /*
-       * Clear previous execution timeline.
-       */
-
       setActivityEntries([]);
 
 
       try {
 
-        /*
-         * Execute complete AI
-         * Finance Controller pipeline.
-         */
-
         const result =
           await processInvoice(
             invoiceText,
-            apiKey,
-            handleAgentEvent
+            llmConfig,
+            handleAgentEvent,
           );
 
-
-        /*
-         * Convert result into
-         * auditable transaction.
-         */
 
         const auditedInvoice:
           AuditedInvoice = {
@@ -592,63 +590,60 @@ function App() {
         };
 
 
-        /*
-         * Add newest audit first.
-         */
-
         setAudits(
           (
-            currentAudits
+            currentAudits,
           ) => [
             auditedInvoice,
             ...currentAudits,
-          ]
+          ],
         );
 
-
-      } catch (error) {
+      } catch (
+        auditError
+      ) {
 
         console.error(
           "AI Finance Controller audit failed:",
-          error
+          auditError,
         );
 
 
-        /*
-         * Convert technical errors
-         * into safe user-facing messages.
-         */
-
         const message =
           getUserFriendlyError(
-            error
+            auditError,
           );
 
 
         setAgentStatus(
-          "error"
+          "error",
         );
 
 
         setError(
-          message
+          message,
         );
 
 
         addActivity(
           "error",
-          message
+          message,
         );
-
 
       } finally {
 
         setIsAuditing(
-          false
+          false,
         );
       }
     };
 
+
+  /*
+   * ==========================================================
+   * RENDER
+   * ==========================================================
+   */
 
   return (
     <div className="min-h-screen bg-[#07090d] text-slate-200">
@@ -671,12 +666,12 @@ function App() {
           ==================================================== */}
 
       <Header
-        apiKey={
-          apiKey
+        llmConfig={
+          llmConfig
         }
 
-        onApiKeyChange={
-          handleApiKeyChange
+        onLLMConfigChange={
+          handleLLMConfigChange
         }
       />
 
@@ -703,7 +698,9 @@ function App() {
 
 
             <h2 className="text-2xl font-bold tracking-tight text-white">
+
               Expense Audit Command Center
+
             </h2>
 
 
@@ -745,6 +742,25 @@ function App() {
 
 
         {/* ==================================================
+            BATCH EVALUATION
+            ================================================== */}
+
+        <div className="mt-6">
+
+          <BatchEvaluationPanel
+            llmConfig={
+              llmConfig
+            }
+
+            disabled={
+              isAuditing
+            }
+          />
+
+        </div>
+
+
+        {/* ==================================================
             WORKSPACE
             ================================================== */}
 
@@ -780,13 +796,17 @@ function App() {
                 <div>
 
                   <h3 className="text-sm font-semibold text-white">
+
                     Transaction Document
+
                   </h3>
 
 
                   <p className="text-xs text-slate-600">
+
                     Paste an invoice, receipt,
                     or expense data.
+
                   </p>
 
                 </div>
@@ -795,15 +815,16 @@ function App() {
 
 
               <textarea
+
                 value={
                   invoiceText
                 }
 
                 onChange={(
-                  event
+                  event,
                 ) =>
                   setInvoiceText(
-                    event.target.value
+                    event.target.value,
                   )
                 }
 
@@ -814,6 +835,7 @@ function App() {
                 className="mt-5 min-h-[240px] w-full resize-y rounded-xl border border-white/10 bg-black/20 p-4 font-mono text-sm leading-6 text-slate-300 outline-none placeholder:text-slate-700 focus:border-indigo-500/40 focus:ring-2 focus:ring-indigo-500/10"
 
                 placeholder="Paste invoice or receipt information here..."
+
               />
 
 
@@ -838,12 +860,15 @@ function App() {
                     size={13}
                   />
 
-                  Gemini API key required
+                  LLM endpoint required
+                  {" • "}
+                  credential optional
 
                 </div>
 
 
                 <button
+
                   type="button"
 
                   onClick={
@@ -855,6 +880,7 @@ function App() {
                   }
 
                   className="ml-auto inline-flex items-center gap-2 rounded-xl bg-indigo-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-indigo-500/10 transition hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-50"
+
                 >
 
                   {isAuditing ? (
@@ -893,6 +919,7 @@ function App() {
                 ================================================= */}
 
             <AgentActivity
+
               entries={
                 activityEntries
               }
@@ -900,6 +927,7 @@ function App() {
               currentStatus={
                 agentStatus
               }
+
             />
 
 
@@ -914,13 +942,17 @@ function App() {
                 <div>
 
                   <h3 className="text-sm font-semibold text-white">
+
                     Audit Results
+
                   </h3>
 
 
                   <p className="mt-1 text-xs text-slate-600">
+
                     AI extraction and
-                    policy decisions
+                    deterministic policy decisions
+
                   </p>
 
                 </div>
@@ -931,8 +963,7 @@ function App() {
                   {audits.length}
                   {" "}
                   transaction
-                  {audits.length !==
-                  1
+                  {audits.length !== 1
                     ? "s"
                     : ""}
 
@@ -942,6 +973,7 @@ function App() {
 
 
               <AuditTable
+
                 invoices={
                   audits
                 }
@@ -949,6 +981,7 @@ function App() {
                 onSelect={
                   setSelectedInvoice
                 }
+
               />
 
             </section>
@@ -965,15 +998,17 @@ function App() {
           ==================================================== */}
 
       <ResultDrawer
+
         invoice={
           selectedInvoice
         }
 
         onClose={() =>
           setSelectedInvoice(
-            null
+            null,
           )
         }
+
       />
 
     </div>

@@ -20,6 +20,52 @@ export type AgentStatus =
 
 /*
  * ============================================================
+ * LLM CONFIGURATION
+ * ============================================================
+ */
+
+export interface LLMConfig {
+  /*
+   * User-provided inference endpoint.
+   */
+  endpoint: string;
+
+  /*
+   * Optional API credential.
+   *
+   * Local/self-hosted models may not require one.
+   */
+  apiKey?: string;
+
+  /*
+   * Optional model identifier.
+   */
+  model?: string;
+}
+
+
+/*
+ * ============================================================
+ * EXTRACTED INVOICE FACTS
+ * ============================================================
+ *
+ * These are the ONLY facts the LLM is responsible for
+ * extracting.
+ *
+ * Policy decisions are intentionally excluded.
+ */
+
+export interface ExtractedInvoiceFacts {
+  vendor_name: string;
+  total_amount: number;
+  category: string;
+  invoice_date: string;
+  department_code: string;
+}
+
+
+/*
+ * ============================================================
  * POLICY VIOLATION
  * ============================================================
  *
@@ -37,34 +83,23 @@ export interface PolicyViolation {
  * ============================================================
  * INVOICE RESULT
  * ============================================================
+ *
+ * Final application-level result.
+ *
+ * Extracted facts come from the LLM.
+ * Compliance, violations and risk come from deterministic
+ * application logic.
  */
 
 export interface InvoiceResult {
   vendor_name: string;
-
   total_amount: number;
-
   category: string;
 
   policy_violation: boolean;
 
-  /*
-   * Human-readable policy violation
-   * messages used by the existing UI.
-   */
   violation_details: string[];
 
-  /*
-   * Structured policy violations.
-   *
-   * Example:
-   *
-   * {
-   *   policy_id: "P-001",
-   *   policy_name: "Meal Expense Limit",
-   *   message: "Meal expense exceeds ₹3,000 limit."
-   * }
-   */
   violations: PolicyViolation[];
 
   strategic_recommendation: string;
@@ -85,6 +120,7 @@ export interface InvoiceResult {
 
 export interface AuditedInvoice
   extends InvoiceResult {
+
   id: string;
 
   raw_input: string;
@@ -101,9 +137,7 @@ export interface AuditedInvoice
 
 export interface AuditMetrics {
   totalAmount: number;
-
   violationCount: number;
-
   cleanCount: number;
 }
 
@@ -112,20 +146,6 @@ export interface AuditMetrics {
  * ============================================================
  * BATCH EVALUATION
  * ============================================================
- *
- * Types used by the synthetic-data evaluation system.
- *
- * The evaluator compares the application's actual audit
- * decision against a known ground-truth decision.
- */
-
-
-/*
- * ------------------------------------------------------------
- * SYNTHETIC TRANSACTION
- * ------------------------------------------------------------
- *
- * Represents one controlled test record.
  */
 
 export interface SyntheticTransaction {
@@ -141,42 +161,28 @@ export interface SyntheticTransaction {
 }
 
 
-/*
- * ------------------------------------------------------------
- * BATCH EVALUATION RESULT
- * ------------------------------------------------------------
- *
- * Represents the result of auditing one synthetic record.
- */
-
 export interface BatchEvaluationResult {
   transaction_id: string;
 
   expected_policy_status: PolicyStatus;
 
-  actual_policy_status: PolicyStatus;
+  actual_policy_status?: PolicyStatus;
 
   expected_risk_level: RiskLevel;
 
-  actual_risk_level: RiskLevel;
+  actual_risk_level?: RiskLevel;
 
   expected_policy_ids: string[];
 
-  actual_policy_ids: string[];
+  actual_policy_ids?: string[];
 
   matched: boolean;
 
-  result?: AuditedInvoice;
+  result?: InvoiceResult;
 
   error?: string;
 }
 
-
-/*
- * ------------------------------------------------------------
- * BATCH EVALUATION METRICS
- * ------------------------------------------------------------
- */
 
 export interface BatchEvaluationMetrics {
   total_records: number;
@@ -196,14 +202,6 @@ export interface BatchEvaluationMetrics {
   exceptions: BatchEvaluationResult[];
 }
 
-
-/*
- * ------------------------------------------------------------
- * BATCH EVALUATION
- * ------------------------------------------------------------
- *
- * Complete output produced by the batch evaluator.
- */
 
 export interface BatchEvaluation {
   metrics: BatchEvaluationMetrics;

@@ -1,22 +1,82 @@
 # AI Finance Controller: Agentic Policy Engine
 
-> **Gemini extracts facts. Deterministic application code decides policy compliance.**
+> **The configured LLM extracts facts. Deterministic application code decides policy compliance.**
 
-Built for the **Razorpay Buildathon 2026**.
+Built for the **Razorpay Buildathon 2026 — AI Finance Controller track**.
 
-An AI-powered financial expense auditing engine that combines LLM-based document extraction with deterministic financial controls.
+[Repository](https://github.com/BasuSourav140/ai-finance-controller) · [Razorpay Buildathon](https://razorpay.com/buildathon/)
 
-The system extracts structured transaction data from invoices, receipts, and expense documents, validates the AI output, self-corrects malformed responses with a bounded retry, evaluates transactions against explicit company policies, calculates risk, and produces actionable audit recommendations.
+AI Finance Controller is an AI-assisted finance-operations control system that turns unstructured expense documents into structured facts, validates those facts, applies deterministic financial policies, assigns risk, and produces an auditable recommendation.
 
-The result is not simply an AI invoice extractor.
+The project is designed around a simple boundary:
 
-It is an **AI-assisted financial control system**.
+```text
+LLM = interpretation
+Application code = financial control
+```
+
+That boundary is intentional. The model helps understand messy finance data; it does **not** get to decide whether a policy was violated.
 
 ---
 
-## Why This Project?
+## Razorpay Buildathon 2026: Track Alignment
 
-Traditional invoice automation often focuses primarily on:
+The Razorpay Buildathon 2026 **AI Finance Controller** track asks builders to close one finance-operations loop across a **50+ record synthetic-data batch**, report a **match rate**, and surface the **exceptions the system could not resolve**. Razorpay's stated bar is **throughput + measured accuracy + an honest exception list**.
+
+This project is built around that requirement:
+
+| Track requirement | Project implementation |
+| --- | --- |
+| Finance-operations workflow | Expense / invoice policy auditing |
+| 50+ record synthetic batch | Built-in synthetic evaluation dataset and full-benchmark flow |
+| Measured accuracy | Expected-vs-actual batch evaluation and match rate |
+| Honest exceptions | Explicit unresolved-exception view |
+| Meaningful AI use | LLM extracts facts from unstructured transaction text |
+| Reliable controls | Deterministic policy engine evaluates compliance |
+| Auditability | Policy IDs, risk, recommendation, source input, raw model output, and execution timeline |
+
+No benchmark score is hard-coded into this README. The score shown by the application depends on the configured LLM and the actual benchmark run.
+
+---
+
+# What the Controller Does
+
+The controller closes the following expense-control loop:
+
+```text
+Invoice / Receipt / Expense Text
+              ↓
+       LLM Fact Extraction
+              ↓
+        JSON Validation
+              ↓
+   Bounded Self-Correction
+        (max 1 retry)
+              ↓
+   Deterministic Policy Engine
+              ↓
+        Risk Assessment
+              ↓
+    Financial Recommendation
+              ↓
+      Auditable Decision
+```
+
+The system currently evaluates three explicit policies:
+
+```text
+P-001  Meal Expense Limit
+P-002  SaaS Department Code
+P-003  Invoice Date Requirement
+```
+
+It can also evaluate a synthetic batch against expected ground truth and report where the controller disagrees with that ground truth.
+
+---
+
+# Why This Architecture?
+
+Traditional invoice automation often stops here:
 
 ```text
 Document
@@ -26,200 +86,143 @@ OCR / Extraction
 Structured Data
 ```
 
-That solves the extraction problem, but another important question remains:
+The controller adds the part that matters for a financial-control workflow:
 
-> **Does this transaction comply with the company's financial policy?**
+> **Does the extracted transaction comply with the company's financial policy?**
 
-The AI Finance Controller extends the workflow:
+Instead of asking the LLM to answer that question directly, the system uses the model for extraction and the application for enforcement.
 
 ```text
-Document
-   ↓
-AI Extraction
-   ↓
-Schema Validation
-   ↓
-Self-Correction
-   ↓
-Deterministic Policy Enforcement
-   ↓
-Risk Assessment
-   ↓
-Recommendation
-   ↓
-Auditable Decision
+┌──────────────────────────────┐
+│       Configured LLM         │
+│                              │
+│ Extract factual fields from  │
+│ unstructured documents       │
+└──────────────┬───────────────┘
+               │
+               ▼
+┌──────────────────────────────┐
+│      JSON / Schema Check      │
+│                              │
+│ Is the extracted response    │
+│ structurally usable?          │
+└──────────────┬───────────────┘
+               │
+               ▼
+┌──────────────────────────────┐
+│   Deterministic Policy       │
+│          Engine              │
+│                              │
+│ Does the transaction comply? │
+└──────────────┬───────────────┘
+               │
+               ▼
+┌──────────────────────────────┐
+│       Risk + Recommendation  │
+└──────────────────────────────┘
 ```
 
-The architecture deliberately separates probabilistic AI interpretation from deterministic financial controls.
+This prevents an LLM-generated compliance opinion from silently becoming the final financial-control decision.
 
 ---
 
 # Core Design Principle
 
-> **"Gemini extracts facts. Deterministic application code decides policy compliance."**
+> **The configured LLM extracts facts. Deterministic application code decides policy compliance.**
 
-LLMs are effective at interpreting unstructured documents, but financial policy enforcement benefits from explicit and deterministic rules.
+The extraction prompt explicitly tells the model **not** to:
 
-Therefore:
+- decide whether a policy was violated
+- calculate risk
+- generate compliance decisions
+- generate policy violations
+- generate recommendations
+- invent missing information
 
-```text
-                ┌───────────────────────┐
-                │       Gemini          │
-                │                       │
-                │ Extract facts from    │
-                │ unstructured documents│
-                └───────────┬───────────┘
-                            │
-                            ▼
-                ┌───────────────────────┐
-                │   Schema Validation   │
-                │                       │
-                │ Is the AI response    │
-                │ structurally valid?   │
-                └───────────┬───────────┘
-                            │
-                            ▼
-                ┌───────────────────────┐
-                │ Deterministic Policy  │
-                │       Engine          │
-                │                       │
-                │ Does the transaction  │
-                │ comply with policy?   │
-                └───────────┬───────────┘
-                            │
-                            ▼
-                ┌───────────────────────┐
-                │   Recommendation      │
-                │       Engine          │
-                └───────────────────────┘
-```
-
-This prevents an LLM-generated compliance opinion from directly becoming the final financial decision.
+The application then evaluates the extracted fields independently. This separation makes the control layer predictable, testable, explainable, and auditable.
 
 ---
 
-# Key Differentiators
+# Agentic Self-Correction
 
-## 1. Deterministic Financial Controls
+The controller does not blindly trust the first model response.
 
-Policy decisions are evaluated in application code.
-
-The LLM is not trusted to make the final compliance decision.
-
-This makes the control layer:
-
-- Predictable
-- Testable
-- Explainable
-- Auditable
-
----
-
-## 2. Agentic Self-Correction
-
-The controller does not blindly trust the first AI response.
-
-The generated JSON passes through client-side validation.
-
-When Gemini produces malformed JSON or fails schema validation:
+The LLM response is parsed and validated locally. When the response is malformed or does not match the expected extraction structure, the controller performs **one bounded correction attempt**.
 
 ```text
-Gemini Response
-       ↓
+LLM Response
+     ↓
 JSON / Schema Validation
-       │
-       ├── VALID
-       │     ↓
-       │ Policy Engine
-       │
-       └── INVALID
-             ↓
-       Self-Correction
-             ↓
-       Gemini Retry #1
-             ↓
-       JSON / Schema Validation
-             │
-             ├── VALID
-             │     ↓
-             │ Policy Engine
-             │
-             └── INVALID
-                   ↓
-             Manual Review
+     │
+     ├── VALID ───────────────→ Policy Engine
+     │
+     └── INVALID
+            ↓
+      Correction Prompt
+            ↓
+          Retry #1
+            ↓
+     JSON / Schema Validation
+            │
+            ├── VALID ───────→ Policy Engine
+            │
+            └── INVALID ─────→ Manual Review
 ```
 
-The retry loop is intentionally limited to **one retry**.
+The correction prompt contains the source document, the previous model response, and schema-validation context. The retry is deliberately bounded to one attempt so an invalid response cannot create an uncontrolled model-call loop.
 
-This prevents uncontrolled API loops and unnecessary repeated model calls.
+### Why one retry?
+
+```text
+Retry 0 → initial extraction
+Retry 1 → correction attempt
+Retry 2+ → not allowed
+```
+
+A finance-control workflow should prefer explicit failure over an invisible, potentially expensive retry loop.
 
 ---
 
-## 3. Exact Error-Context Correction
+# Fail-Closed Behavior
 
-The self-correction prompt includes the actual validation failure.
+The controller separates malformed model output from API failures.
 
-The retry receives:
-
-```text
-Original document
-        +
-Previous Gemini response
-        +
-Exact validation error
-```
-
-For example:
+### Model-output failure
 
 ```text
-EXACT VALIDATION ERROR:
-
-total_amount must be a finite number.
+Invalid JSON / invalid extracted structure
+                  ↓
+            Self-correction
+                  ↓
+               Retry #1
+                  ↓
+              Validation
+                  ↓
+       Valid → continue
+       Invalid → manual review
 ```
 
-The model is then explicitly instructed to correct the structural problem and return only valid application JSON.
+### API failure
 
-This makes the retry targeted rather than simply asking the model to "try again."
+```text
+Authentication / rate limit / network error
+                  ↓
+                 Stop
+                  ↓
+        Surface actionable error
+```
+
+An API failure is not treated as if the model merely produced a malformed answer. Likewise, an invalid model response is never silently converted into financial approval.
 
 ---
 
-## 4. Fail-Closed Audit Behavior
+# Deterministic Policy Engine
 
-The system distinguishes between AI-output validation failures and Gemini API failures.
-
-### AI Output Failure
-
-```text
-Invalid JSON
-     ↓
-Self-Correction
-     ↓
-Retry #1
-     ↓
-Validation
-```
-
-### API Failure
-
-```text
-Quota / Authentication / Network Error
-                ↓
-             Stop
-                ↓
-       Recover / Retry Later
-```
-
-Quota errors are not treated as malformed AI output and do not enter the self-correction loop.
-
----
-
-# Policy Engine
-
-The controller currently enforces three policies.
+The current controller enforces three policies.
 
 ## P-001 — Meal Expense Limit
 
-Any meal expense above ₹3,000 must be flagged for review.
+Any meal expense **above ₹3,000** is flagged for review.
 
 ```text
 Category = Meal
@@ -235,21 +238,15 @@ Example:
 Meal amount: ₹4,720
 Policy limit: ₹3,000
 
-Result:
-FAIL
-
-Policy:
-P-001 — Meal Expense Limit
-
-Risk:
-MEDIUM
+Result: FAIL
+Policy: P-001
 ```
 
 ---
 
 ## P-002 — SaaS Department Code
 
-Any software or SaaS expense must contain a department code.
+Software / SaaS expenses must contain a department code.
 
 ```text
 Software / SaaS
@@ -262,17 +259,11 @@ P-002 VIOLATION
 Example:
 
 ```text
-Category:
-SaaS
+Category: SaaS
+Department code: Missing
 
-Department code:
-Missing
-
-Result:
-FAIL
-
-Policy:
-P-002 — SaaS Department Code
+Result: FAIL
+Policy: P-002
 ```
 
 ---
@@ -291,12 +282,49 @@ CRITICAL RISK
 
 ---
 
+# Policy Registry
+
+The controller maintains its active financial policies through a structured policy registry.
+
+Each policy contains:
+
+- A unique policy ID
+- A policy name
+- A human-readable description
+
+Current policies:
+
+```text
+┌────────┬────────────────────────────────────┐
+│ P-001  │ Meal Expense Limit                 │
+├────────┼────────────────────────────────────┤
+│ P-002  │ SaaS Department Code               │
+├────────┼────────────────────────────────────┤
+│ P-003  │ Invoice Date Requirement           │
+└────────┴────────────────────────────────────┘
+```
+
+The policy registry provides a centralized representation of the rules enforced by the deterministic policy engine.
+
+Policy evaluation itself remains deterministic application logic. The LLM does not decide whether a policy has been violated.
+
+Deterministic violations carry structured information such as:
+
+```ts
+{
+  policy_id: string;
+  policy_name: string;
+  message: string;
+}
+```
+
+That lets the audit interface show **which rule failed and why**.
 
 ---
 
 # Risk Assessment
 
-The controller calculates an overall risk level from deterministic policy results.
+The controller derives an overall risk level from deterministic policy results.
 
 Supported levels:
 
@@ -307,7 +335,7 @@ HIGH
 CRITICAL
 ```
 
-Current behavior:
+Current policy-to-risk behavior:
 
 ```text
 No violations
@@ -327,39 +355,100 @@ Missing invoice date
 CRITICAL
 ```
 
-Critical invoice-date violations take precedence over the other risk levels.
+A missing invoice date takes precedence and produces `CRITICAL` risk.
 
 ---
 
 # Recommendation Engine
 
-After policy evaluation, the recommendation engine converts the policy result into an actionable financial-control recommendation.
+The recommendation layer converts deterministic policy results into an actionable finance-control recommendation.
 
-### Clean transaction
+For a compliant transaction:
 
 ```text
 Approve automatically.
 Transaction complies with current company policy.
 ```
 
-### Policy violation
-
-For example:
+For a violation, the recommendation depends on the deterministic policy outcome. For example:
 
 ```text
 Request an itemized receipt and obtain manager approval
 before reimbursement.
 ```
 
-The recommendation is derived from the deterministic policy result rather than allowing the LLM to independently determine the final business action.
+The recommendation is generated **after** policy evaluation. The LLM does not independently select the final financial-control action.
+
+---
+
+# Batch Evaluation & Benchmarking
+
+This is the part of the project most directly aligned with the Razorpay Finance Controller track.
+
+The application includes a synthetic evaluation dataset and a batch evaluator. Each record has expected ground-truth attributes, while the controller produces actual attributes after processing the record.
+
+The evaluator compares:
+
+- Expected policy status vs. actual policy status
+- Expected risk level vs. actual risk level
+- Expected policy IDs vs. actual policy IDs
+
+A record is treated as a match only when the evaluated output agrees with the expected result across the comparison fields.
+
+### Reported metrics
+
+```text
+Total records
+Processed records
+Matched records
+Match rate
+Exception count
+Policy violation count
+Clean transaction count
+Unresolved exceptions
+```
+
+Conceptually:
+
+```text
+Synthetic Finance Dataset
+          ↓
+     Batch Evaluator
+          ↓
+    AI Finance Controller
+          ↓
+    Expected vs Actual
+          ↓
+ ┌───────────────────────┐
+ │ Match Rate            │
+ │ Matched Records       │
+ │ Exceptions            │
+ │ Unresolved Records    │
+ └───────────────────────┘
+```
+
+The UI exposes two benchmark actions:
+
+```text
+Test 3 Records
+Run Full Benchmark
+```
+
+During the full run, the interface reports processing progress and then lists the unresolved exceptions.
+
+### Important evaluation rule
+
+The benchmark score is **not** a claim that the system has a universal accuracy rate. It measures the current controller against the supplied synthetic ground truth using the currently configured LLM.
+
+The full benchmark should be run before quoting a final match-rate number in a competition submission.
 
 ---
 
 # Agent Execution Timeline
 
-The dashboard exposes the actual application-level execution lifecycle.
+The dashboard exposes the application's observable execution stages:
 
-## Normal Execution
+### Normal execution
 
 ```text
 Document Extraction
@@ -371,7 +460,7 @@ Policy Evaluation
 Audit Completed
 ```
 
-## Self-Correction Execution
+### Self-correction execution
 
 ```text
 Document Extraction
@@ -380,7 +469,7 @@ JSON Validation
         ↓
 Self-Correction
         ↓
-Gemini Retry #1
+Retry #1
         ↓
 2nd JSON Validation
         ↓
@@ -389,7 +478,7 @@ Policy Evaluation
 Audit Completed
 ```
 
-## Unrecoverable Validation Failure
+### Unrecoverable validation failure
 
 ```text
 Document Extraction
@@ -398,7 +487,7 @@ JSON Validation
         ↓
 Self-Correction
         ↓
-Gemini Retry #1
+Retry #1
         ↓
 2nd JSON Validation
         ↓
@@ -407,91 +496,232 @@ INVALID
 Manual Review
 ```
 
-The timeline exposes application-level events without attempting to expose private model reasoning or hidden chain-of-thought.
+The timeline shows application-level events only. It does not expose private model reasoning or hidden chain-of-thought.
 
 ---
 
-# Architecture Flow
+# Why This Is Agentic
+
+The agentic behavior is deliberately bounded rather than open-ended. The controller observes the result of each extraction attempt, validates it, decides whether correction is needed, and either continues the workflow or stops for manual review.
 
 ```text
-                          ┌──────────────────────┐
-                          │         User         │
-                          │   Invoice / Receipt  │
-                          └──────────┬───────────┘
-                                     │
-                                     ▼
-                          ┌──────────────────────┐
-                          │    React Frontend    │
-                          │ Transaction Document │
-                          └──────────┬───────────┘
-                                     │
-                                     ▼
-                          ┌──────────────────────┐
-                          │   Gemini API (BYOK)  │
-                          │ Document Extraction  │
-                          └──────────┬───────────┘
-                                     │
-                                     ▼
-                          ┌──────────────────────┐
-                          │    JSON / Schema     │
-                          │     Validation       │
-                          └──────────┬───────────┘
-                                     │
-                           ┌─────────┴─────────┐
-                           │                   │
-                        Invalid              Valid
-                           │                   │
-                           ▼                   │
-                 ┌──────────────────┐          │
-                 │ Self-Correction  │          │
-                 │ Maximum 1 retry  │          │
-                 └─────────┬────────┘          │
-                           │                   │
-                           ▼                   │
-                 ┌──────────────────┐          │
-                 │   Gemini Retry   │          │
-                 │ + Error Context  │          │
-                 └─────────┬────────┘          │
-                           │                   │
-                           ▼                   │
-                 ┌──────────────────┐          │
-                 │  2nd Validation  │          │
-                 └─────────┬────────┘          │
-                           │                   │
-                         Valid                 │
-                           │                   │
-                           └──────────┐        │
-                                      │        │
-                                      ▼        │
-                           ┌──────────────────────┐
-                           │    Deterministic     │
-                           │    Policy Engine     │
-                           └──────────┬───────────┘
+Observe → Validate → Correct when needed → Re-validate
                                       │
-                                      ▼
-                           ┌──────────────────────┐
-                           │   Risk Assessment    │
-                           └──────────┬───────────┘
-                                      │
-                                      ▼
-                           ┌──────────────────────┐
-                           │    Recommendation    │
-                           │        Engine        │
-                           └──────────┬───────────┘
-                                      │
-                                      ▼
-                           ┌──────────────────────┐
-                           │     Audit Result     │
-                           │   + Agent Timeline   │
-                           └──────────────────────┘
-
-             If 2nd validation fails:
-                         │
-                         ▼
-                ┌───────────────────┐
-                │   Manual Review   │
-                └───────────────────┘
+                         success ─────┴───── failure
+                           ↓                    ↓
+                     Apply policy        Manual review
 ```
+
+This gives the system an explicit control loop while keeping financial policy enforcement deterministic.
+
+---
+
+# System Architecture
+
+```text
+                           ┌─────────────────────┐
+                           │        User         │
+                           │ Invoice / Receipt   │
+                           └──────────┬──────────┘
+                                      │
+                                      ▼
+                           ┌─────────────────────┐
+                           │   React Frontend    │
+                           │ Transaction Input   │
+                           └──────────┬──────────┘
+                                      │
+                                      ▼
+                           ┌─────────────────────┐
+                           │   Configured LLM    │
+                           │ Fact Extraction     │
+                           └──────────┬──────────┘
+                                      │
+                                      ▼
+                           ┌─────────────────────┐
+                           │ JSON / Schema       │
+                           │ Validation          │
+                           └──────────┬──────────┘
+                                      │
+                         ┌────────────┴────────────┐
+                         │                         │
+                      INVALID                   VALID
+                         │                         │
+                         ▼                         │
+                ┌──────────────────┐              │
+                │ Self-Correction  │              │
+                │ Maximum 1 Retry  │              │
+                └────────┬─────────┘              │
+                         │                         │
+                         ▼                         │
+                ┌──────────────────┐              │
+                │ 2nd Validation   │              │
+                └────────┬─────────┘              │
+                         │                         │
+                      VALID                        │
+                         │                         │
+                         └────────────┬────────────┘
+                                      ▼
+                           ┌─────────────────────┐
+                           │ Deterministic       │
+                           │ Policy Engine       │
+                           └──────────┬──────────┘
+                                      │
+                                      ▼
+                           ┌─────────────────────┐
+                           │ Risk Assessment     │
+                           └──────────┬──────────┘
+                                      │
+                                      ▼
+                           ┌─────────────────────┐
+                           │ Recommendation      │
+                           │ Engine              │
+                           └──────────┬──────────┘
+                                      │
+                                      ▼
+                           ┌─────────────────────┐
+                           │ Audit Result        │
+                           │ + Agent Timeline    │
+                           └─────────────────────┘
+
+                         2nd validation failure
+                                      │
+                                      ▼
+                           ┌─────────────────────┐
+                           │ Manual Review       │
+                           └─────────────────────┘
+```
+
+The application is intentionally client-side in its current form. There is no intermediate application backend between the browser and the configured LLM endpoint.
+
+---
+
+# LLM Configuration
+
+The current implementation is **provider-neutral at the application layer**.
+
+Instead of hard-coding one model vendor, the UI accepts:
+
+| Setting | Required | Purpose |
+| --- | --- | --- |
+| Endpoint | Yes | HTTP endpoint receiving the extraction request |
+| Model | No | Model identifier, when the endpoint expects one |
+| Credential | No | Bearer credential when the endpoint requires authentication |
+
+The current client expects a **chat-completions-style JSON HTTP contract**. It is not a universal adapter for every provider-native API.
+
+## Request contract
+
+```http
+POST <configured-endpoint>
+Content-Type: application/json
+Authorization: Bearer <credential>   # only when configured
+```
+
+```json
+{
+  "model": "...",
+  "messages": [
+    {
+      "role": "user",
+      "content": "<extraction prompt>"
+    }
+  ],
+  "temperature": 0.1,
+  "response_format": {
+    "type": "json_schema",
+    "json_schema": {
+      "name": "invoice_extraction",
+      "strict": true,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "vendor_name": { "type": "string" },
+          "total_amount": { "type": "number" },
+          "category": { "type": "string" },
+          "invoice_date": { "type": "string" },
+          "department_code": { "type": "string" }
+        },
+        "required": [
+          "vendor_name",
+          "total_amount",
+          "category",
+          "invoice_date",
+          "department_code"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}
+```
+
+## Expected response contract
+
+The client expects the generated extraction text in a response shaped like:
+
+```json
+{
+  "choices": [
+    {
+      "message": {
+        "content": "{\"vendor_name\":\"Example Vendor\", ...}"
+      }
+    }
+  ]
+}
+```
+
+The application then parses and validates the returned JSON locally before running policy evaluation.
+
+### CORS requirement
+
+Because the current application calls the configured endpoint directly from the browser, the endpoint must permit the browser origin through an appropriate **CORS configuration**. This is a deployment requirement of the current client-side architecture.
+
+---
+
+# Bring Your Own Key / Credential
+
+The application follows a browser-based **BYOK / user-supplied credential** model.
+
+```text
+User
+ │
+ │ Endpoint + optional credential
+ ▼
+React Frontend
+ │
+ │ HTTP request
+ ▼
+Configured LLM Endpoint
+```
+
+The configuration is stored locally in browser storage so that the application can remember the endpoint, model, and optional credential between sessions.
+
+## Security limitation
+
+This is appropriate for a **demo / buildathon prototype**, but it should not be mistaken for production-grade secret management.
+
+Because the request originates in the browser:
+
+- The configured credential is available to the client application.
+- The credential is stored in browser local storage by the current implementation.
+- There is no backend secret vault.
+- There is no server-side authentication gateway.
+- Anyone using the browser session should be assumed able to access client-side configuration.
+
+For production, the expected architecture is to move provider credentials behind a trusted backend or model gateway.
+
+---
+
+# Data Handling
+
+The current implementation does not use an intermediate application backend or persistent application database for audit records.
+
+Transaction text is sent directly from the browser to the configured LLM endpoint according to the user's endpoint and credential configuration.
+
+Provider-side data handling, logging, retention, and privacy therefore depend on the configured endpoint and its policies.
+
+The application does **not** make independent guarantees about provider-side retention or zero-retention behavior.
 
 ---
 
@@ -499,51 +729,51 @@ The timeline exposes application-level events without attempting to expose priva
 
 The dashboard is designed as an enterprise-style financial control center.
 
-## Header
+### Header
 
-Displays:
+Shows the controller identity and the configured LLM status.
 
-- AI Finance Controller
-- Agentic Policy Engine
-- Gemini API BYOK status
-- Local browser storage indication
+### Policy Panel
 
----
-
-## Policy Panel
-
-Displays the active company policies:
+Displays the active policies:
 
 ```text
-P-001
-Meal Expense Limit
-Maximum ₹3,000
+P-001  Meal Expense Limit
+      Maximum ₹3,000
 
-P-002
-SaaS Department Code
-Department code required
+P-002  SaaS Department Code
+      Department code required
 
-P-003
-Invoice Date Requirement
-Invoice date required
+P-003  Invoice Date Requirement
+      Invoice date required
 ```
 
----
-
-## Transaction Input
+### Transaction Input
 
 Users can paste:
 
-- Invoices
-- Receipts
-- Expense records
-- Structured or semi-structured transaction text
+- invoices
+- receipts
+- expense records
+- structured or semi-structured transaction text
 
----
+### Batch Evaluation Panel
 
-## Audit Dashboard
+Shows:
 
-The dashboard provides:
+```text
+Records
+Match Rate
+Matched
+Exceptions
+Clean
+```
+
+and, when needed, an **Unresolved Exceptions** section showing expected vs. actual output.
+
+### Audit Dashboard
+
+The main dashboard tracks:
 
 - Total amount processed
 - Policy violation count
@@ -551,15 +781,11 @@ The dashboard provides:
 - Audit results
 - Policy status
 - Risk level
-- Actionable insights
+- Recommendations
 
----
+### Detailed Audit Drawer
 
-## Detailed Audit Drawer
-
-Each audit can be opened for detailed inspection.
-
-The drawer exposes:
+A selected audit exposes the chain from source input to decision:
 
 ```text
 Transaction Summary
@@ -577,7 +803,7 @@ Raw Agent JSON
 Original Transaction Input
 ```
 
-This creates a visible audit trail from source document to final policy decision.
+This creates a visible audit trail without relying on model reasoning as the source of truth.
 
 ---
 
@@ -586,23 +812,14 @@ This creates a visible audit trail from source document to final policy decision
 ## Clean SaaS Transaction
 
 ```text
-Vendor:
-CloudStack Technologies
-
-Category:
-SaaS
-
-Total:
-₹5,723
-
-Department Code:
-ENG-001
-
-Invoice Date:
-2026-08-28
+Vendor: CloudStack Technologies
+Category: SaaS
+Total: ₹5,723
+Department Code: ENG-001
+Invoice Date: 2026-08-28
 ```
 
-Result:
+Expected application result:
 
 ```text
 PASS
@@ -611,137 +828,60 @@ LOW RISK
 P-001 ✓
 P-002 ✓
 P-003 ✓
-
-Recommendation:
-Approve automatically.
 ```
-
----
 
 ## Meal Policy Violation
 
 ```text
-Vendor:
-Royal Kitchen
-
-Category:
-Meal
-
-Total:
-₹4,720
-
-Department Code:
-HR-002
-
-Invoice Date:
-2026-08-29
+Vendor: Royal Kitchen
+Category: Meal
+Total: ₹4,720
+Department Code: HR-002
+Invoice Date: 2026-08-29
 ```
 
-Result:
+Expected application result:
 
 ```text
 FAIL
 MEDIUM RISK
 
 P-001 ✕
-
 Meal Expense Limit
-
-Meal expense of ₹4,720 exceeds
-the ₹3,000 limit.
-
-Recommendation:
-Request an itemized receipt and obtain
-manager approval before reimbursement.
+Meal expense exceeds the ₹3,000 limit.
 ```
+
+The recommendation is produced by deterministic application logic after policy evaluation.
 
 ---
 
-# Bring Your Own Key (BYOK)
+# Test Scenarios
 
-The current application uses a **Bring Your Own Key** model.
+| Scenario | Input condition | Expected status | Expected policy | Expected risk |
+| --- | --- | --- | --- | --- |
+| Clean transaction | SaaS + department code + invoice date present | PASS | None | LOW |
+| Meal limit | Meal amount > ₹3,000 | FAIL | P-001 | MEDIUM |
+| SaaS coding | SaaS without department code | FAIL | P-002 | MEDIUM |
+| Missing date | Invoice date missing | FAIL | P-003 | CRITICAL |
+| Multiple violations | More than one policy violation | FAIL | Multiple | HIGH unless P-003 applies |
 
-Users provide their own Gemini API key.
+### Self-correction scenario
+
+When an LLM response cannot be parsed or validated:
 
 ```text
-User
- │
- │ Own Gemini API Key
- ▼
-React Frontend
- │
- ▼
-Gemini API
+Validation Failure
+        ↓
+Correction Prompt
+        ↓
+Retry #1
+        ↓
+Validation
+        ↓
+Policy Evaluation
 ```
 
-The application does not provide a centralized Gemini API key.
-
-The current implementation stores the supplied key in browser local storage for convenience.
-
-## Important Security Limitation
-
-This is a browser-based application.
-
-A client-side API key cannot be treated as a server-side secret because the browser user can inspect client-side storage and network requests.
-
-The current BYOK architecture is therefore best suited to:
-
-- Local development
-- Demonstrations
-- Personal projects
-- Controlled client-side deployments
-
-For a production architecture requiring centralized authentication, stronger secret management, organization-level access control, or server-side governance, Gemini requests should be moved behind a backend/API layer.
-
-Recommended production architecture:
-
-```text
-React Frontend
-      │
-      ▼
-Backend / API Gateway
-      │
-      ▼
-Gemini API
-```
-
----
-
-# Data Handling
-
-The current client-side application does not operate an intermediate application backend or application database for audit records.
-
-Transaction information is sent directly from the browser to Gemini using the user's own API key.
-
-Provider-side data handling remains subject to the policies and configuration of the Gemini / Google Cloud project being used.
-
-The application does not make independent guarantees about provider-side retention.
-
----
-
-# Technology Stack
-
-## Frontend
-
-- React 19
-- TypeScript
-- Vite
-- Tailwind CSS
-- Lucide React
-
-## AI
-
-- Google Gemini API
-- Gemini 3.6 Flash
-
-## Application Services
-
-- AI Agent Service
-- JSON / Schema Validator
-- Deterministic Policy Engine
-- Risk Assessment
-- Recommendation Engine
-- Agent Execution Timeline
+If the second response is still invalid, the controller stops and requires manual review.
 
 ---
 
@@ -753,19 +893,27 @@ ai-finance-controller/
 ├── public/
 │
 ├── src/
-│   │
 │   ├── components/
 │   │   ├── AgentActivity.tsx
 │   │   ├── AuditTable.tsx
+│   │   ├── BatchEvaluationPanel.tsx
 │   │   ├── Header.tsx
 │   │   ├── Metrics.tsx
 │   │   ├── PolicyPanel.tsx
 │   │   └── ResultDrawer.tsx
 │   │
+│   ├── data/
+│   │   └── evaluationDataset.ts
+│   │
 │   ├── services/
 │   │   ├── aiAgent.ts
+│   │   ├── batchEvaluator.ts
 │   │   ├── policyEngine.ts
-│   │   └── recommendationEngine.ts
+│   │   ├── recommendationEngine.ts
+│   │   └── llm/
+│   │       ├── extractionSchema.ts
+│   │       ├── llmClient.ts
+│   │       └── llmConfig.ts
 │   │
 │   ├── types/
 │   │   └── index.ts
@@ -776,6 +924,7 @@ ai-finance-controller/
 │   └── main.tsx
 │
 ├── .gitignore
+├── LICENSE
 ├── index.html
 ├── package.json
 ├── package-lock.json
@@ -788,37 +937,37 @@ ai-finance-controller/
 └── README.md
 ```
 
+### Important modules
+
+| Module | Responsibility |
+| --- | --- |
+| `aiAgent.ts` | Orchestrates extraction, validation, bounded correction, policy evaluation, and recommendation |
+| `llmClient.ts` | Sends the provider-neutral HTTP request and parses the configured endpoint response |
+| `extractionSchema.ts` | Defines the structured extraction schema |
+| `llmConfig.ts` | Loads and stores endpoint/model/credential configuration locally |
+| `policyEngine.ts` | Performs deterministic financial-policy evaluation |
+| `recommendationEngine.ts` | Produces recommendations from policy outcomes |
+| `batchEvaluator.ts` | Runs the synthetic benchmark and computes metrics/exceptions |
+| `evaluationDataset.ts` | Supplies expected ground truth for synthetic evaluation |
+| `BatchEvaluationPanel.tsx` | Presents benchmark progress, match rate, and unresolved exceptions |
+
 ---
 
 # Getting Started
 
 ## Prerequisites
 
-You need:
-
 - Node.js
 - npm
-- A Gemini API key
+- Access to an LLM endpoint compatible with the HTTP contract described above
 
----
+No provider-specific credential is hard-coded into the application.
 
 ## Installation
 
-Clone the repository:
-
 ```bash
-git clone <repository-url>
-```
-
-Enter the project directory:
-
-```bash
+git clone https://github.com/BasuSourav140/ai-finance-controller.git
 cd ai-finance-controller
-```
-
-Install dependencies:
-
-```bash
 npm install
 ```
 
@@ -828,25 +977,25 @@ Start the development server:
 npm run dev
 ```
 
-Vite will provide the local development URL.
+Vite will print the local development URL.
 
 ---
 
 # Using the Application
 
-## 1. Enter Your Gemini API Key
+## 1. Configure the LLM
 
-Enter the key in:
+In the header configuration controls, provide:
 
 ```text
-Gemini API • BYOK
+Endpoint       required
+Model          optional, endpoint-dependent
+Credential     optional, endpoint-dependent
 ```
 
-The key is stored locally in the browser.
+Save the configuration.
 
----
-
-## 2. Paste Transaction Data
+## 2. Paste a Transaction
 
 Example:
 
@@ -861,11 +1010,8 @@ Annual SaaS infrastructure subscription
 
 Subtotal: ₹4,850
 Tax: ₹873
-
 Total: ₹5,723
 ```
-
----
 
 ## 3. Run the Audit
 
@@ -875,12 +1021,14 @@ Click:
 Run Audit
 ```
 
-The controller executes the complete audit pipeline:
+The application executes:
 
 ```text
 Extraction
     ↓
 Validation
+    ↓
+Self-Correction when needed
     ↓
 Policy Evaluation
     ↓
@@ -889,261 +1037,223 @@ Risk Assessment
 Recommendation
 ```
 
----
+## 4. Run the Benchmark
 
-## 4. Review the Decision
+Open **Batch Evaluation** and use:
+
+```text
+Test 3 Records
+```
+
+for a quick sanity check, or:
+
+```text
+Run Full Benchmark
+```
+
+for the complete synthetic evaluation batch.
+
+## 5. Review Results
 
 Inspect:
 
-- Policy status
-- Risk level
-- Violated policy
-- Recommendation
-- Raw agent output
-- Original document
-
----
-
-# Test Scenarios
-
-## Scenario 1 — Clean Transaction
-
-```text
-Category: SaaS
-Department Code: ENG-001
-Invoice Date: Present
-```
-
-Expected:
-
-```text
-PASS
-LOW
-```
-
----
-
-## Scenario 2 — P-001
-
-```text
-Category: Meal
-Amount: ₹4,720
-```
-
-Expected:
-
-```text
-FAIL
-P-001
-MEDIUM
-```
-
----
-
-## Scenario 3 — P-002
-
-```text
-Category: SaaS
-Department Code: Missing
-```
-
-Expected:
-
-```text
-FAIL
-P-002
-MEDIUM
-```
-
----
-
-## Scenario 4 — P-003
-
-```text
-Invoice Date: Missing
-```
-
-Expected:
-
-```text
-FAIL
-P-003
-CRITICAL
-```
-
----
-
-## Scenario 5 — Self-Correction
-
-When a malformed AI response is encountered:
-
-```text
-Validation Failure
-       ↓
-Self-Correction
-       ↓
-Retry #1
-       ↓
-Validation
-       ↓
-Policy Evaluation
-```
-
-If the second validation also fails:
-
-```text
-Validation Failure
-       ↓
-Manual Review
-```
+- policy status
+- risk level
+- policy IDs
+- recommendation
+- raw model output
+- original transaction input
+- benchmark match rate
+- unresolved exceptions
 
 ---
 
 # Error Handling
 
-The controller distinguishes between input, AI-output, and API errors.
+The application distinguishes common failure classes.
 
-## Missing API Key
+### Missing endpoint
 
 ```text
-Please enter your Gemini API key.
+Please configure an LLM endpoint before running an audit.
 ```
 
-## Invalid Authentication
+### Authentication failure
 
 ```text
-Gemini API authentication failed.
-Please check your API key.
+LLM authentication failed.
+Please check the configured credential.
 ```
 
-## Quota / Rate Limit
+### Rate limit / quota
 
 ```text
-Gemini quota or rate limit reached.
-Please try again after the quota resets.
+LLM rate limit or quota reached.
+The audit could not be completed.
+Please try again later.
 ```
 
-## Network Failure
+### Network failure
 
 ```text
-Unable to reach the Gemini API.
-Please check your internet connection and try again.
+Unable to reach the configured LLM endpoint.
+Please check the endpoint and network connection.
 ```
 
-## Unrecoverable AI Validation Failure
+### Unrecoverable extraction failure
 
 ```text
-The AI response could not be validated after
+The LLM response could not be validated after
 the allowed self-correction attempt.
 Manual review is required.
+```
+
+### Empty or unusable response
+
+```text
+The configured LLM returned an unusable response.
+Please try the audit again.
 ```
 
 ---
 
 # Engineering Principles
 
-## Separate Probabilistic and Deterministic Responsibilities
+## Separate probabilistic interpretation from deterministic decisions
 
-Use AI for interpretation.
+Use the model where interpretation is difficult.
 
-Use deterministic code for policy enforcement.
+Use application code where financial decisions must be repeatable.
 
----
+## Fail closed
 
-## Fail Closed
+An invalid or unavailable model response should never silently become financial approval.
 
-An invalid AI response should never silently become a financial approval.
+## Bound agent loops
 
----
+The current implementation allows one self-correction retry.
 
-## Bound Agent Loops
+## Make decisions explainable
 
-Self-correction is useful, but unlimited retries are dangerous.
-
-The current implementation allows:
-
-```text
-Maximum retries = 1
-```
-
----
-
-## Make Decisions Explainable
-
-A financial control system should be able to answer:
+A finance-control system should be able to answer:
 
 ```text
 What failed?
 Which policy failed?
-What was the observed value?
-What risk level was assigned?
-What action is recommended?
+What values were observed?
+What risk was assigned?
+What recommendation was produced?
 ```
 
-The audit drawer is designed around these questions.
+The audit drawer and benchmark exception view are designed around these questions.
+
+## Measure before claiming accuracy
+
+The benchmark is treated as an evaluation tool, not a marketing number. A final competition submission should quote the actual measured result from the final dataset/model configuration.
+
+---
+
+# Recommended Buildathon Demo Flow
+
+For a short judging demo, the strongest sequence is to show the complete loop rather than only a successful invoice.
+
+```text
+1. Configure the LLM endpoint
+            ↓
+2. Run one clean transaction
+            ↓
+3. Run one transaction that violates P-001 / P-002 / P-003
+            ↓
+4. Show the observable agent timeline
+            ↓
+5. Run the full benchmark (the final submission dataset must contain 50+ records)
+            ↓
+6. Show match rate + matched records + unresolved exceptions
+```
+
+The benchmark result should be presented exactly as measured. Do not replace exceptions with hand-picked examples or quote a score that was not produced by the final benchmark run.
+
+---
+
+# Razorpay Submission Checklist
+
+Razorpay's Buildathon page asks participants to build something real, publish a **public repository**, and show the work through a **5-minute pitch video** and the **architecture**. The AI Finance Controller track additionally asks for a **50+ record synthetic-data batch**, a **match rate**, and the **exceptions the system could not resolve**.
+
+Before submission, verify:
+
+- The GitHub repository is public.
+- The final repository contains the working benchmark and evaluation dataset.
+- The full benchmark has been run against the final model/configuration.
+- The measured match rate is copied from the actual benchmark output.
+- Unresolved exceptions are shown honestly.
+- The 5-minute pitch demonstrates the finance-ops loop, not only the UI.
+- The architecture shown in the pitch matches the implementation documented here.
 
 ---
 
 # Current Limitations
 
-The current version is intentionally client-side.
+The current version is intentionally a client-side buildathon prototype.
 
-Known limitations:
+Known boundaries:
 
-- Gemini requests originate in the browser.
-- The user's API key is stored in browser local storage.
+- LLM requests originate directly from the browser.
+- Endpoint, model, and optional credential are stored in browser local storage.
 - There is no backend authentication service.
 - There is no persistent server-side audit database.
-- Policies are currently defined in application code.
-- There is no organization/tenant management layer.
+- Policies are currently implemented in application code and represented through the policy registry.
+- There is no multi-tenant organization layer.
 - Role-based access control is not implemented.
-- Centralized approval workflows are not implemented.
+- Approval workflows are not implemented as a backend workflow system.
 - Server-side secret management is not implemented.
+- The client expects a specific chat-completions-style HTTP contract rather than every provider-native API format.
+- Browser CORS support is required from the configured endpoint.
 
-These limitations are explicit boundaries of the current architecture.
+These are explicit scope boundaries, not hidden behavior.
 
 ---
 
 # Future Architecture
 
-A larger production deployment could evolve toward:
+A production-oriented version could evolve into:
 
 ```text
-                       ┌─────────────────────┐
-                       │   Web Application   │
-                       │      React UI       │
-                       └──────────┬──────────┘
-                                  │
-                                  ▼
-                       ┌─────────────────────┐
-                       │    API Gateway      │
-                       └──────────┬──────────┘
-                                  │
-                  ┌───────────────┼────────────────┐
-                  │               │                │
-                  ▼               ▼                ▼
-          ┌────────────┐  ┌────────────┐   ┌──────────────┐
-          │ AI Agent   │  │  Policy    │   │ Audit Store  │
-          │ Service    │  │  Service   │   │              │
-          └──────┬─────┘  └─────┬──────┘   └──────────────┘
-                 │              │
-                 ▼              ▼
-            Gemini API     Policy Registry
+                      ┌─────────────────────┐
+                      │   Web Application   │
+                      │      React UI       │
+                      └──────────┬──────────┘
+                                 │
+                                 ▼
+                      ┌─────────────────────┐
+                      │     API Gateway     │
+                      └──────────┬──────────┘
+                                 │
+              ┌──────────────────┼──────────────────┐
+              │                  │                  │
+              ▼                  ▼                  ▼
+       ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
+       │ AI Agent /   │   │ Policy       │   │ Audit Store  │
+       │ Model Gateway│   │ Service      │   │              │
+       └──────┬───────┘   └──────┬───────┘   └──────────────┘
+              │                  │
+              ▼                  ▼
+       LLM Provider        Policy Registry
 ```
 
-Possible extensions include:
+Possible production extensions:
 
-- Authentication
-- Role-based access control
-- Organization-level policies
+- Authentication and authorization
+- Organization / tenant isolation
+- Server-side credential management
 - Policy versioning
 - Persistent audit history
 - Approval workflows
-- Department analytics
-- Vendor analytics
-- Spending intelligence
+- Department and vendor analytics
 - Compliance reporting
-- Centralized model/API management
+- Centralized model routing and evaluation
+- Larger benchmark suites and held-out test sets
+
+Razorpay's broader 2026 product direction also highlights agentic handling of financial operations, including reconciliation and bookkeeping workflows. This project focuses on a deliberately bounded expense-control loop rather than attempting to solve every finance operation at once. See [Razorpay Agent Studio](https://razorpay.com/newsroom/?p=4704) and [Razorpay Sprint 2026](https://razorpay.com/sprint/26) for that broader context.
 
 ---
 
@@ -1175,65 +1285,68 @@ npm run preview
 
 ---
 
-# Project Philosophy
-
-```text
-Use AI where interpretation is difficult.
-Use deterministic software where decisions must be reliable.
-```
-
-The AI Finance Controller applies this principle to financial auditing:
-
-```text
-Unstructured document
-        ↓
-AI interpretation
-        ↓
-Structured data
-        ↓
-Deterministic controls
-        ↓
-Risk
-        ↓
-Action
-        ↓
-Audit trail
-```
-
-The goal is not to replace financial controls with AI.
-
-The goal is to use AI to make existing controls **faster, more scalable, and easier to operate — without giving up deterministic enforcement.**
-
----
-
 # Current Implementation Status
 
-The current implementation includes:
+The current application includes:
 
-- AI document extraction
-- Gemini integration
-- Structured JSON validation
+- AI-assisted invoice / expense fact extraction
+- Configurable LLM endpoint
+- Optional model configuration
+- Optional user-supplied credential / BYOK architecture
+- Structured JSON / schema validation
 - One-retry self-correction
-- Exact validation-error feedback
+- Validation-context correction prompt
 - Deterministic policy engine
+- Policy registry
 - P-001 / P-002 / P-003
 - Risk assessment
 - Recommendation engine
 - Agent execution timeline
+- Synthetic batch evaluation
+- Match-rate reporting
+- Unresolved exception reporting
+- Batch progress UI
 - Audit dashboard
 - Detailed audit drawer
 - Raw JSON inspection
-- Original transaction input inspection
-- BYOK API-key architecture
+- Original transaction-input inspection
 - Friendly API error handling
-- ESLint validation
-- Production build validation
+- ESLint script
+- Production build script
+
+---
+
+# Project Philosophy
+
+```text
+Use AI where interpretation is difficult.
+Use deterministic software where financial decisions must be reliable.
+```
+
+Applied end to end:
+
+```text
+Unstructured finance document
+          ↓
+     AI interpretation
+          ↓
+     Structured facts
+          ↓
+ Deterministic financial controls
+          ↓
+         Risk
+          ↓
+   Recommendation / review
+          ↓
+       Audit trail
+```
+
+The goal is not to replace financial controls with AI.
+
+The goal is to make those controls **faster, more scalable, and easier to operate without giving up deterministic enforcement**.
 
 ---
 
 ## License
 
-This project is licensed under the MIT License.
-
-See the [LICENSE](LICENSE) file for the full license text.
-
+MIT License. See [LICENSE](LICENSE) for the full license text.

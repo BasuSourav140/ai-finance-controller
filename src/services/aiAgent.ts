@@ -1,6 +1,8 @@
 import type {
   AgentStatus,
+  ExtractedInvoiceFacts,
   InvoiceResult,
+  LLMConfig,
 } from "../types";
 
 import {
@@ -11,79 +13,44 @@ import {
   generateRecommendation,
 } from "./recommendationEngine";
 
-const GEMINI_MODEL =
-  "gemini-3.6-flash";
+import {
+  callLLM,
+  LLMApiError,
+} from "./llm/llmClient";
+
+import {
+  INVOICE_EXTRACTION_SCHEMA,
+} from "./llm/extractionSchema";
+
 
 const MAX_RETRIES = 1;
 
-const GEMINI_API_URL =
-  `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
-const POLICY_RULES = `
-COMPANY EXPENSE POLICY
+/*
+ * ============================================================
+ * AGENT EVENTS
+ * ============================================================
+ *
+ * Keep the existing event contract used by App.tsx.
+ */
 
-Rule 1:
-Any meal expense over ₹3,000 must be flagged for review.
-
-Rule 2:
-Any software or SaaS expense must have a department_code.
-If department_code is missing, flag the transaction.
-
-Rule 3:
-Every invoice must have a date.
-If invoice date is missing, flag it as Critical Risk.
-`;
-
-class InvoiceValidationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name =
-      "InvoiceValidationError";
-  }
+export interface AgentStatusEvent {
+  type: "status";
+  status: AgentStatus;
+  message: string;
 }
 
 
-/*
- * GeminiApiError represents an error
- * returned by the Gemini API itself.
- *
- * retryable is intentionally kept separate
- * from JSON/schema self-correction.
- */
-class GeminiApiError extends Error {
-  readonly statusCode?: number;
-  readonly retryAfterSeconds?: number;
-
-  constructor(
-    message: string,
-    statusCode?: number,
-    retryAfterSeconds?: number
-  ) {
-    super(message);
-
-    this.name =
-      "GeminiApiError";
-
-    this.statusCode =
-      statusCode;
-
-    this.retryAfterSeconds =
-      retryAfterSeconds;
-  }
+export interface AgentRetryEvent {
+  type: "retry";
+  message: string;
+  attempt: number;
 }
 
 
 export type AgentEvent =
-  | {
-      type: "status";
-      status: AgentStatus;
-      message: string;
-    }
-  | {
-      type: "retry";
-      attempt: number;
-      message: string;
-    };
+  | AgentStatusEvent
+  | AgentRetryEvent;
 
 
 export type AgentEventHandler =
@@ -92,13 +59,33 @@ export type AgentEventHandler =
 
 /*
  * ============================================================
- * VALIDATE GEMINI RESPONSE
+ * VALIDATION ERROR
  * ============================================================
  */
 
-function validateInvoiceResult(
-  value: unknown
-): InvoiceResult {
+export class InvoiceValidationError
+  extends Error {
+
+  constructor(
+    message: string,
+  ) {
+    super(message);
+
+    this.name =
+      "InvoiceValidationError";
+  }
+}
+
+
+/*
+ * ============================================================
+ * VALIDATE EXTRACTED FACTS
+ * ============================================================
+ */
+
+function validateExtractedInvoiceFacts(
+  value: unknown,
+): ExtractedInvoiceFacts {
 
   if (
     value === null ||
@@ -106,9 +93,10 @@ function validateInvoiceResult(
     Array.isArray(value)
   ) {
     throw new InvoiceValidationError(
-      "Response must be a JSON object."
+      "LLM response must be a JSON object.",
     );
   }
+
 
   const data =
     value as Record<string, unknown>;
@@ -119,7 +107,7 @@ function validateInvoiceResult(
     "string"
   ) {
     throw new InvoiceValidationError(
-      "vendor_name must be a string."
+      "vendor_name must be a string.",
     );
   }
 
@@ -128,11 +116,11 @@ function validateInvoiceResult(
     typeof data.total_amount !==
       "number" ||
     !Number.isFinite(
-      data.total_amount
+      data.total_amount,
     )
   ) {
     throw new InvoiceValidationError(
-      "total_amount must be a finite number."
+      "total_amount must be a finite number.",
     );
   }
 
@@ -142,50 +130,7 @@ function validateInvoiceResult(
     "string"
   ) {
     throw new InvoiceValidationError(
-      "category must be a string."
-    );
-  }
-
-
-  if (
-    typeof data.policy_violation !==
-    "boolean"
-  ) {
-    throw new InvoiceValidationError(
-      "policy_violation must be a boolean."
-    );
-  }
-
-
-  if (
-    !Array.isArray(
-      data.violation_details
-    )
-  ) {
-    throw new InvoiceValidationError(
-      "violation_details must be an array."
-    );
-  }
-
-
-  if (
-    !data.violation_details.every(
-      (item) =>
-        typeof item === "string"
-    )
-  ) {
-    throw new InvoiceValidationError(
-      "violation_details must contain strings only."
-    );
-  }
-
-
-  if (
-    typeof data.strategic_recommendation !==
-    "string"
-  ) {
-    throw new InvoiceValidationError(
-      "strategic_recommendation must be a string."
+      "category must be a string.",
     );
   }
 
@@ -195,7 +140,7 @@ function validateInvoiceResult(
     "string"
   ) {
     throw new InvoiceValidationError(
-      "invoice_date must be a string."
+      "invoice_date must be a string.",
     );
   }
 
@@ -205,567 +150,216 @@ function validateInvoiceResult(
     "string"
   ) {
     throw new InvoiceValidationError(
-      "department_code must be a string."
+      "department_code must be a string.",
     );
   }
 
 
   return {
     vendor_name:
-      data.vendor_name,
+      data.vendor_name.trim(),
 
     total_amount:
       data.total_amount,
 
     category:
-      data.category,
-
-    policy_violation:
-      data.policy_violation,
-
-    violation_details:
-      data.violation_details,
-
-    /*
-     * Gemini does not determine
-     * deterministic policy violations.
-     *
-     * policyEngine.ts fills this later.
-     */
-    violations: [],
-
-    strategic_recommendation:
-      data.strategic_recommendation,
+      data.category.trim(),
 
     invoice_date:
-      data.invoice_date,
+      data.invoice_date.trim(),
 
     department_code:
-      data.department_code,
-
-    risk_level: "LOW",
+      data.department_code.trim(),
   };
 }
 
 
 /*
  * ============================================================
- * EXTRACT GEMINI TEXT
- * ============================================================
- */
-
-function extractGeminiText(
-  response: unknown
-): string {
-
-  if (
-    response === null ||
-    typeof response !== "object"
-  ) {
-    throw new GeminiApiError(
-      "Gemini returned an invalid API response."
-    );
-  }
-
-  const data =
-    response as {
-      candidates?: Array<{
-        content?: {
-          parts?: Array<{
-            text?: string;
-          }>;
-        };
-      }>;
-    };
-
-
-  const text =
-    data.candidates?.[0]
-      ?.content
-      ?.parts?.[0]
-      ?.text;
-
-
-  if (
-    typeof text !== "string" ||
-    !text.trim()
-  ) {
-    throw new GeminiApiError(
-      "Gemini returned an empty response."
-    );
-  }
-
-
-  return text.trim();
-}
-
-
-/*
- * ============================================================
- * REMOVE CODE FENCES
+ * STRIP CODE FENCES
  * ============================================================
  */
 
 function stripCodeFences(
-  text: string
+  text: string,
 ): string {
 
-  return text
-    .replace(/^```json\s*/i, "")
-    .replace(/^```\s*/i, "")
-    .replace(/\s*```$/i, "")
+  const trimmed =
+    text.trim();
+
+
+  if (
+    !trimmed.startsWith("```")
+  ) {
+    return trimmed;
+  }
+
+
+  return trimmed
+    .replace(
+      /^```(?:json)?\s*/i,
+      "",
+    )
+    .replace(
+      /\s*```$/,
+      "",
+    )
     .trim();
 }
 
 
 /*
  * ============================================================
- * PARSE GEMINI JSON
+ * PARSE LLM RESPONSE
  * ============================================================
  */
 
 function parseInvoiceResponse(
-  responseText: string
-): InvoiceResult {
+  text: string,
+): ExtractedInvoiceFacts {
+
+  const cleaned =
+    stripCodeFences(text);
+
 
   let parsed: unknown;
 
 
   try {
-
     parsed =
-      JSON.parse(
-        responseText
-      );
-
-  } catch (error) {
-
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Unknown JSON parsing error.";
-
-
+      JSON.parse(cleaned);
+  } catch {
     throw new InvoiceValidationError(
-      `Invalid JSON syntax: ${message}`
+      "LLM response was not valid JSON.",
     );
   }
 
 
-  return validateInvoiceResult(
-    parsed
+  return validateExtractedInvoiceFacts(
+    parsed,
   );
 }
 
 
 /*
  * ============================================================
- * INITIAL PROMPT
+ * INITIAL EXTRACTION PROMPT
  * ============================================================
  */
 
 function buildInitialPrompt(
-  invoiceText: string
+  invoiceText: string,
 ): string {
 
   return `
-You are the AI Finance Controller,
-an autonomous financial document
-extraction and policy-audit agent.
+You are the extraction component of an AI Finance Controller.
 
-Your primary responsibility is to
-accurately extract facts from the
-supplied invoice or receipt.
+Your ONLY responsibility is to extract factual information
+from the supplied invoice or expense document.
 
-${POLICY_RULES}
+Do NOT decide whether any financial policy was violated.
+
+Do NOT calculate risk.
+
+Do NOT generate a compliance decision.
+
+Do NOT generate policy violations.
+
+Do NOT generate recommendations.
+
+Do NOT invent information that is not present.
+
+If a field is missing from the source document, return an
+empty string for that field.
+
+The application will independently evaluate all financial
+policies after extraction.
+
+Return EXACTLY one JSON object matching this schema:
+
+${JSON.stringify(
+  INVOICE_EXTRACTION_SCHEMA,
+  null,
+  2,
+)}
+
+Required fields:
+
+- vendor_name: string
+- total_amount: number
+- category: string
+- invoice_date: string
+- department_code: string
+
+Rules:
+
+1. total_amount must be a number.
+2. Do not include currency symbols inside total_amount.
+3. Preserve the invoice date when present.
+4. Preserve department codes when present.
+5. Use an empty string when invoice_date is missing.
+6. Use an empty string when department_code is missing.
+7. Do not return Markdown.
+8. Do not return explanations.
+9. Do not return additional fields.
 
 SOURCE DOCUMENT:
-----------------
+
 ${invoiceText}
-----------------
-
-EXTRACTION REQUIREMENTS:
-
-1. Extract the vendor name.
-2. Extract the total monetary amount as a number.
-3. Determine the expense category.
-4. Extract the invoice date.
-5. Extract the department_code if present.
-6. If a required string value cannot be found,
-   return an empty string.
-7. Do not invent missing information.
-8. total_amount MUST be a JSON number.
-
-OUTPUT REQUIREMENTS:
-
-Return EXACTLY one JSON object.
-
-Do NOT use Markdown.
-Do NOT use code fences.
-Do NOT add explanations.
-
-The JSON must contain exactly:
-
-{
-  "vendor_name": string,
-  "total_amount": number,
-  "category": string,
-  "policy_violation": boolean,
-  "violation_details": string[],
-  "strategic_recommendation": string,
-  "invoice_date": string,
-  "department_code": string
-}
-
-The application will independently
-verify all company policies using
-a deterministic policy engine.
-
-Return ONLY valid JSON.
-`;
+`.trim();
 }
 
 
 /*
  * ============================================================
- * SELF-CORRECTION PROMPT
+ * CORRECTION PROMPT
  * ============================================================
  */
 
 function buildCorrectionPrompt(
   invoiceText: string,
   previousResponse: string,
-  errorMessage: string
+  validationError: string,
 ): string {
 
   return `
-You are correcting your previous response
-as an AI Finance Controller.
+The previous extraction response was invalid.
 
-Your previous response failed client-side
-JSON/schema validation.
+You are the extraction component of an AI Finance Controller.
 
-SELF-CORRECTION REQUIRED.
+Your ONLY responsibility is to extract factual information
+from the source document.
 
-EXACT VALIDATION ERROR:
-${errorMessage}
+Do NOT evaluate financial policies.
 
-PREVIOUS RESPONSE:
+Do NOT calculate risk.
+
+Do NOT generate policy violations.
+
+Do NOT generate recommendations.
+
+Return EXACTLY one JSON object matching this schema:
+
+${JSON.stringify(
+  INVOICE_EXTRACTION_SCHEMA,
+  null,
+  2,
+)}
+
+Validation error:
+
+${validationError}
+
+Previous response:
+
 ${previousResponse}
 
-SOURCE DOCUMENT:
-----------------
+Source document:
+
 ${invoiceText}
-----------------
 
-COMPANY POLICY:
-${POLICY_RULES}
-
-Correct the exact validation problem.
-
-IMPORTANT:
-
-You failed to provide valid application JSON.
-
-Provide ONLY JSON.
-Do NOT use Markdown.
-Do NOT use code fences.
-Do NOT include explanations.
-Do NOT include comments.
-
-The JSON must contain exactly:
-
-{
-  "vendor_name": string,
-  "total_amount": number,
-  "category": string,
-  "policy_violation": boolean,
-  "violation_details": string[],
-  "strategic_recommendation": string,
-  "invoice_date": string,
-  "department_code": string
-}
-
-Make sure:
-
-- vendor_name is a string.
-- total_amount is a number.
-- category is a string.
-- policy_violation is a boolean.
-- violation_details is an array of strings.
-- strategic_recommendation is a string.
-- invoice_date is a string.
-- department_code is a string.
-
-Do not invent information.
-
-Return ONLY valid JSON.
-`;
-}
-
-
-/*
- * ============================================================
- * PARSE RETRY-AFTER
- * ============================================================
- *
- * Gemini may return retry information in the
- * response body or HTTP headers.
- */
-
-function parseRetryAfterSeconds(
-  response: Response,
-  errorBody: unknown
-): number | undefined {
-
-  const headerValue =
-    response.headers.get(
-      "Retry-After"
-    );
-
-
-  if (headerValue) {
-
-    const seconds =
-      Number(
-        headerValue
-      );
-
-    if (
-      Number.isFinite(seconds) &&
-      seconds >= 0
-    ) {
-      return seconds;
-    }
-  }
-
-
-  if (
-    errorBody !== null &&
-    typeof errorBody === "object"
-  ) {
-
-    const body =
-      errorBody as {
-        error?: {
-          details?: Array<{
-            retryDelay?: string;
-          }>;
-        };
-      };
-
-
-    const retryDelay =
-      body.error
-        ?.details
-        ?.find(
-          (detail) =>
-            typeof detail.retryDelay ===
-            "string"
-        )
-        ?.retryDelay;
-
-
-    if (retryDelay) {
-
-      const match =
-        retryDelay.match(
-          /([\d.]+)s/
-        );
-
-
-      if (match) {
-
-        const seconds =
-          Number(
-            match[1]
-          );
-
-        if (
-          Number.isFinite(
-            seconds
-          )
-        ) {
-          return seconds;
-        }
-      }
-    }
-  }
-
-
-  return undefined;
-}
-
-
-/*
- * ============================================================
- * GEMINI API REQUEST
- * ============================================================
- */
-
-async function callGemini(
-  prompt: string,
-  apiKey: string
-): Promise<string> {
-
-  let response: Response;
-
-
-  try {
-
-    response =
-      await fetch(
-        `${GEMINI_API_URL}?key=${encodeURIComponent(
-          apiKey
-        )}`,
-        {
-          method: "POST",
-
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
-
-          body: JSON.stringify({
-            contents: [
-              {
-                role: "user",
-
-                parts: [
-                  {
-                    text: prompt,
-                  },
-                ],
-              },
-            ],
-
-            generationConfig: {
-              temperature: 0.1,
-
-              responseMimeType:
-                "application/json",
-            },
-          }),
-        }
-      );
-
-  } catch {
-
-    throw new GeminiApiError(
-      "Unable to reach Gemini API. Check your network connection."
-    );
-  }
-
-
-  if (!response.ok) {
-
-    let errorBody:
-      unknown = null;
-
-
-    try {
-
-      errorBody =
-        await response.json();
-
-    } catch {
-      // Keep errorBody as null.
-    }
-
-
-    let apiMessage =
-      `Gemini API request failed with status ${response.status}.`;
-
-
-    if (
-      errorBody !== null &&
-      typeof errorBody === "object"
-    ) {
-
-      const body =
-        errorBody as {
-          error?: {
-            message?: string;
-          };
-        };
-
-
-      if (
-        typeof body.error?.message ===
-        "string"
-      ) {
-        apiMessage =
-          body.error.message;
-      }
-    }
-
-
-    /*
-     * ========================================================
-     * QUOTA / RATE LIMIT
-     * ========================================================
-     *
-     * 429 errors are NOT JSON validation failures.
-     *
-     * Therefore they must NEVER enter the
-     * self-correction retry loop.
-     */
-
-    if (
-      response.status === 429
-    ) {
-
-      const retryAfterSeconds =
-        parseRetryAfterSeconds(
-          response,
-          errorBody
-        );
-
-
-      throw new GeminiApiError(
-        retryAfterSeconds !==
-          undefined
-          ? `Gemini quota or rate limit reached. Please retry after approximately ${Math.ceil(
-              retryAfterSeconds
-            )} seconds.`
-          : "Gemini quota or rate limit reached. Please try again later.",
-        429,
-        retryAfterSeconds
-      );
-    }
-
-
-    /*
-     * Invalid API key / authentication.
-     */
-
-    if (
-      response.status === 400 ||
-      response.status === 401 ||
-      response.status === 403
-    ) {
-
-      throw new GeminiApiError(
-        `Gemini authentication or request error: ${apiMessage}`,
-        response.status
-      );
-    }
-
-
-    throw new GeminiApiError(
-      `Gemini API error: ${apiMessage}`,
-      response.status
-    );
-  }
-
-
-  const data =
-    await response.json();
-
-
-  return extractGeminiText(
-    data
-  );
+Return ONLY the corrected JSON object.
+`.trim();
 }
 
 
@@ -776,85 +370,52 @@ async function callGemini(
  */
 
 function waitForUIUpdate(
-  milliseconds = 1200
+  milliseconds: number,
 ): Promise<void> {
 
   return new Promise(
-    (resolve) => {
-
+    (resolve) =>
       setTimeout(
         resolve,
-        milliseconds
-      );
-
-    }
+        milliseconds,
+      ),
   );
 }
 
 
 /*
  * ============================================================
- * MAIN AI FINANCE CONTROLLER PIPELINE
+ * PROCESS INVOICE
  * ============================================================
  */
 
 export async function processInvoice(
-  text: string,
-  apiKey: string,
-  onEvent?: AgentEventHandler
+  invoiceText: string,
+  llmConfig: LLMConfig,
+  onEvent?: AgentEventHandler,
 ): Promise<InvoiceResult> {
 
-  /*
-   * Basic validation.
-   */
-
-  if (!text.trim()) {
-
+  if (
+    !invoiceText.trim()
+  ) {
     throw new Error(
-      "Invoice or receipt text cannot be empty."
+      "Invoice text is required.",
     );
   }
 
 
-  if (!apiKey.trim()) {
-
+  if (
+    !llmConfig.endpoint.trim()
+  ) {
     throw new Error(
-      "Gemini API key is required."
+      "LLM endpoint is required.",
     );
   }
 
 
   let attempt = 0;
 
-
-  let prompt =
-    buildInitialPrompt(
-      text
-    );
-
-
-  let previousResponse =
-    "";
-
-
-  let lastError =
-    "Unknown agent error.";
-
-
-  /*
-   * ==========================================================
-   * STAGE 1 — DOCUMENT EXTRACTION
-   * ==========================================================
-   */
-
-  onEvent?.({
-    type: "status",
-
-    status: "extracting",
-
-    message:
-      "Extracting transaction data from document...",
-  });
+  let previousResponse = "";
 
 
   while (
@@ -864,13 +425,37 @@ export async function processInvoice(
     try {
 
       /*
-       * Gemini document extraction.
+       * --------------------------------------------------------
+       * EXTRACTION
+       * --------------------------------------------------------
        */
 
+      onEvent?.({
+        type: "status",
+
+        status: "extracting",
+
+        message:
+          "Sending invoice to the configured LLM for fact extraction.",
+      });
+
+
+      const prompt =
+        attempt === 0
+          ? buildInitialPrompt(
+              invoiceText,
+            )
+          : buildCorrectionPrompt(
+              invoiceText,
+              previousResponse,
+              "The previous response failed schema validation.",
+            );
+
+
       const response =
-        await callGemini(
+        await callLLM(
           prompt,
-          apiKey
+          llmConfig,
         );
 
 
@@ -879,9 +464,9 @@ export async function processInvoice(
 
 
       /*
-       * ========================================================
-       * STAGE 2 — JSON VALIDATION
-       * ========================================================
+       * --------------------------------------------------------
+       * VALIDATION
+       * --------------------------------------------------------
        */
 
       onEvent?.({
@@ -890,33 +475,79 @@ export async function processInvoice(
         status: "validating",
 
         message:
-          "Gemini response received. Validating JSON and schema...",
+          "Validating the extracted invoice facts.",
       });
 
 
       await waitForUIUpdate(
-        1200
+        1200,
       );
 
 
-      const normalizedResponse =
-        attempt > 0
-          ? stripCodeFences(
-              response
-            )
-          : response;
+      let facts:
+        ExtractedInvoiceFacts;
 
 
-      const invoice =
-        parseInvoiceResponse(
-          normalizedResponse
+      try {
+
+        facts =
+          parseInvoiceResponse(
+            response,
+          );
+
+      } catch (
+        error
+      ) {
+
+        if (
+          !(
+            error instanceof
+            InvoiceValidationError
+          )
+        ) {
+          throw error;
+        }
+
+
+        if (
+          attempt >= MAX_RETRIES
+        ) {
+          throw error;
+        }
+
+
+        /*
+         * ------------------------------------------------------
+         * SELF-CORRECTION
+         * ------------------------------------------------------
+         */
+
+        onEvent?.({
+          type: "retry",
+
+          message:
+            "The LLM response did not match the required schema. Retrying with a correction prompt.",
+
+          attempt:
+            attempt + 1,
+        });
+
+
+        await waitForUIUpdate(
+          1200,
         );
 
 
+        attempt++;
+
+        continue;
+      }
+
+
       /*
-       * ========================================================
-       * STAGE 3 — POLICY EVALUATION
-       * ========================================================
+       * --------------------------------------------------------
+       * DETERMINISTIC POLICY EVALUATION
+       * --------------------------------------------------------
        */
 
       onEvent?.({
@@ -925,37 +556,118 @@ export async function processInvoice(
         status: "evaluating",
 
         message:
-          "Applying deterministic company expense policies...",
+          "Applying deterministic financial policies.",
       });
 
 
       await waitForUIUpdate(
-        1200
+        1200,
       );
 
 
-      const policyResult =
-        evaluatePolicy(
-          invoice
-        );
-
-
       /*
-       * Recommendation is generated from
-       * the deterministic policy result.
+       * Convert extracted facts into the
+       * InvoiceResult shape expected by
+       * the deterministic policy engine.
+       *
+       * The policy engine itself remains
+       * completely independent of the LLM.
        */
 
-      const recommendation =
-        generateRecommendation(
-          policyResult.violation_details,
-          policyResult.risk_level
+      const policyInput:
+        InvoiceResult = {
+
+        vendor_name:
+          facts.vendor_name,
+
+        total_amount:
+          facts.total_amount,
+
+        category:
+          facts.category,
+
+        invoice_date:
+          facts.invoice_date,
+
+        department_code:
+          facts.department_code,
+
+        policy_violation:
+          false,
+
+        violation_details:
+          [],
+
+        violations:
+          [],
+
+        strategic_recommendation:
+          "",
+
+        risk_level:
+          "LOW",
+      };
+
+
+      const policyEvaluation =
+        evaluatePolicy(
+          policyInput,
         );
 
 
       /*
-       * ========================================================
-       * STAGE 4 — COMPLETE
-       * ========================================================
+       * --------------------------------------------------------
+       * STRATEGIC RECOMMENDATION
+       * --------------------------------------------------------
+       *
+       * The recommendation engine consumes:
+       *
+       * 1. violation_details
+       * 2. deterministic risk level
+       *
+       * It does not receive the complete
+       * PolicyEvaluation object.
+       */
+
+      const strategicRecommendation =
+        generateRecommendation(
+          policyEvaluation.violation_details,
+          policyEvaluation.risk_level,
+        );
+
+
+      /*
+       * --------------------------------------------------------
+       * FINAL RESULT
+       * --------------------------------------------------------
+       */
+
+      const finalResult:
+        InvoiceResult = {
+
+        ...facts,
+
+        policy_violation:
+          policyEvaluation.policy_violation,
+
+        violation_details:
+          policyEvaluation.violation_details,
+
+        violations:
+          policyEvaluation.violations,
+
+        strategic_recommendation:
+          strategicRecommendation,
+
+        risk_level:
+          policyEvaluation.risk_level,
+      };
+
+
+      /*
+       * --------------------------------------------------------
+       * COMPLETE
+       * --------------------------------------------------------
        */
 
       onEvent?.({
@@ -968,52 +680,21 @@ export async function processInvoice(
       });
 
 
-      /*
-       * Final result.
-       */
+      return finalResult;
 
-      return {
-        ...invoice,
-
-        policy_violation:
-          policyResult.policy_violation,
-
-        violation_details:
-          policyResult.violation_details,
-
-        violations:
-          policyResult.violations,
-
-        strategic_recommendation:
-          recommendation,
-
-        risk_level:
-          policyResult.risk_level,
-      };
-
-
-    } catch (error) {
+    } catch (
+      error
+    ) {
 
       /*
-       * ========================================================
-       * GEMINI API ERROR
-       * ========================================================
+       * API errors are not schema errors.
        *
-       * API errors do NOT trigger self-correction.
-       *
-       * This includes:
-       *
-       * - 400
-       * - 401
-       * - 403
-       * - 429
-       * - 500
-       * - network failures
+       * Never send them through self-correction.
        */
 
       if (
         error instanceof
-        GeminiApiError
+        LLMApiError
       ) {
 
         onEvent?.({
@@ -1025,49 +706,19 @@ export async function processInvoice(
             error.message,
         });
 
-
         throw error;
       }
 
 
       /*
-       * ========================================================
-       * NON-VALIDATION ERROR
-       * ========================================================
+       * Validation errors generated outside
+       * the inner extraction validation block
+       * should also fail closed.
        */
 
       if (
-        !(
-          error instanceof
-          InvoiceValidationError
-        )
-      ) {
-
-        throw error;
-      }
-
-
-      /*
-       * ========================================================
-       * VALIDATION ERROR
-       * ========================================================
-       *
-       * Only malformed/schema-invalid Gemini output
-       * reaches this section.
-       */
-
-      lastError =
-        error.message;
-
-
-      /*
-       * ========================================================
-       * RETRY LIMIT
-       * ========================================================
-       */
-
-            if (
-        attempt >= MAX_RETRIES
+        error instanceof
+        InvoiceValidationError
       ) {
 
         onEvent?.({
@@ -1076,68 +727,31 @@ export async function processInvoice(
           status: "error",
 
           message:
-            "Self-correction failed. Manual review required.",
+            error.message,
         });
 
-        throw new Error(
-          `AI Agent failed after ${
-            attempt + 1
-          } attempts: ${lastError}`,
-          {
-            cause: error,
-          }
-        );
+        throw error;
       }
-
-
-      /*
-       * ========================================================
-       * SELF-CORRECTION
-       * ========================================================
-       */
-
-      attempt += 1;
-
-
-  
 
 
       onEvent?.({
         type: "status",
 
-        status: "correcting",
+        status: "error",
 
         message:
-          "AI response failed validation. Starting self-correction...",
+          error instanceof Error
+            ? error.message
+            : "Unexpected audit error.",
       });
 
 
-      onEvent?.({
-        type: "retry",
-
-        attempt,
-
-        message:
-          `Retrying Gemini with exact validation error: ${lastError}`,
-      });
-
-
-      prompt =
-        buildCorrectionPrompt(
-          text,
-          previousResponse,
-          lastError
-        );
-
-
-      await waitForUIUpdate(
-        1200
-      );
+      throw error;
     }
   }
 
 
   throw new Error(
-    `AI Agent failed: ${lastError}`
+    "Unable to complete invoice extraction.",
   );
 }
